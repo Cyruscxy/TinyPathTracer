@@ -42,8 +42,12 @@ namespace DeviceSampler
 		return inv_a;
 	}
 
-	__device__ __inline__ Vec3 HemishpereUniform(curandState* state)
+	__device__ __inline__ Vec3 HemishpereUniform(curandState* state, const Vec3& normal)
 	{
+		Vec3 xBase = normal.z == 0.0f ? Vec3(0.0f, 0.0f, 1.0f) : Vec3(1.0f, 0.0f, -normal.x / normal.z);
+		xBase /= xBase.norm();
+		Vec3 zBase = cross(xBase, normal);
+
 		Real Xi1 = curand_uniform(state);
 		Real Xi2 = curand_uniform(state);
 
@@ -53,17 +57,22 @@ namespace DeviceSampler
 		Real y = cosf(theta);
 		Real z = sinf(theta) * cosf(phi);
 
-		return Vec3(x, y, z);
+		return x * xBase + y * normal + z * zBase;
 	}
 
-	__device__ __inline__ Real HemishpereUniformPDF(const Vec3& dir)
+	__device__ __inline__ Real HemishpereUniformPDF(const Vec3& dir, const Vec3& normal)
 	{
-		Real f = (dir.y < 0.0f);
+		Real cosTheta = dot(dir, normal);
+		Real f = (cosTheta < 0.0f);
 		return (1.0f / (2.0f * MathConst::PI)) * f;
 	}
 
-	__device__ __inline__ Vec3 HemisphereCosine(curandState* state)
+	__device__ __inline__ Vec3 HemisphereCosine(curandState* state, const Vec3& normal)
 	{
+		Vec3 xBase = normal.z == 0.0f ? Vec3(0.0f, 0.0f, 1.0f) : Vec3(1.0f, 0.0f, -normal.x / normal.z);
+		xBase /= xBase.norm();
+		Vec3 zBase = cross(xBase, normal);
+
 		Real phi = 2.0f * MathConst::PI * curand_uniform(state);
 		Real cosTheta = sqrtf(curand_uniform(state));
 		Real sinTheta = sqrtf(1.0f - cosTheta * cosTheta);
@@ -71,15 +80,15 @@ namespace DeviceSampler
 		Real x = cosf(phi) * sinTheta;
 		Real z = sinf(phi) * sinTheta;
 		Real y = cosTheta;
-		return Vec3(x, y, z);
+		return x * xBase + y * normal + z * zBase;
 	}
 
-	__device__ __inline__ Real HemishpereCosinePDF(const Vec3& dir)
+	__device__ __inline__ Real HemishpereCosinePDF(const Vec3& dir, const Vec3& normal)
 	{
-		Real f = dir.y < 0.0f;
-		return (dir.y / MathConst::PI) * f;
+		Real cosTheta = dot(dir, normal);
+		Real f = cosTheta < 0.0f;
+		return (cosTheta / MathConst::PI) * f;
 	}
 }
-
 
 #endif

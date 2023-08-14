@@ -23,18 +23,6 @@
 #define KERNEL_DIM(...)
 #define FAKEINIT = {0}
 
-__device__ float sqrtf(float x) { return 0.0f; }
-__device__ float rsqrtf(float x) { return 0.0f; };
-__device__ float sinf(float x) { return 0.0f; };
-__device__ float cosf(float x) { return 0.0f; };
-__device__ float tanf(float x) { return 0.0f; };
-__device__ float acosf(float x) { return 0.0f; };
-// __device__ float min(float x, float y) { return 0.0f; };
-// __device__ float max(float x, float y) { return 0.0f; };
-
-#define min(x, y) ((x) > (y) ? (x) : (y))
-#define max(x, y) ((x) < (y) ? (x) : (y))
-
 //    Reverse the bit order of a 32 bit unsigned integer. 
 __device__ unsigned int __brev(unsigned int  x) {};
 

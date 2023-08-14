@@ -15,8 +15,7 @@
 struct Mesh
 {
 	Mesh() = default;
-
-	inline void readVerticesFromRawPtr(float* ptr, size_t count)
+	void readVerticesFromRawPtr(float* ptr, size_t count)
 	{
 		m_vertexCoords.resize(count);
 		for ( size_t i = 0; i < count; ++i )
@@ -28,7 +27,7 @@ struct Mesh
 		}
 	}
 
-	inline void readNormalsFromRawPtr(float* ptr, size_t count)
+	void readNormalsFromRawPtr(float* ptr, size_t count)
 	{
 		m_vertexNormals.resize(count);
 		for (size_t i = 0; i < count; ++i)
@@ -40,7 +39,7 @@ struct Mesh
 		}
 	}
 
-	inline void readTexcoordsFromRawPtr(float* ptr, size_t count)
+	void readTexcoordsFromRawPtr(float* ptr, size_t count)
 	{
 		m_vertexTexCoords.resize(count);
 		for (size_t i = 0; i < count; ++i)
@@ -52,7 +51,7 @@ struct Mesh
 	}
 
 	template<typename IndexType>
-	inline void readIndicesFromRawPtr(IndexType* ptr, size_t count)
+	void readIndicesFromRawPtr(IndexType* ptr, size_t count)
 	{
 		m_polygons.resize(count);
 		for (size_t i = 0; i < count; ++i)
@@ -86,6 +85,8 @@ struct DeviceScene
 
 	thrust::device_vector<Material> materials;
 	thrust::device_vector<MtlInterval> materialsLUT;
+	thrust::device_vector<Mat4> vertTrans;
+	thrust::device_vector<Mat4> normalTrans;
 };
 
 class Scene
@@ -93,14 +94,13 @@ class Scene
 public:
 	Scene() = default;
 	Scene(const std::string& filename, const std::string& type);
-
 	DeviceScene copySceneToDevice();
 
+	Camera m_camera;
 private:
 	void readFromGLTF(const std::string& filename);
 
 private:
-	Camera m_camera;
 	std::vector<Mesh> m_meshes;
 	std::map<std::string, Material> m_materials;
 

@@ -177,6 +177,8 @@ struct Mat4
 	CUDA_CALLABLE inline Vec4 operator[](Index index) const { return cols[index]; }
 	CUDA_CALLABLE inline Vec4& operator[](Index index) { return cols[index]; }
 	CUDA_CALLABLE inline Mat4 transpose() const;
+	CUDA_CALLABLE inline Real determinant() const;
+	CUDA_CALLABLE inline Mat4 inverse() const;
 	CUDA_CALLABLE inline Mat4 static Identity() { return Mat4(Vec4(1.0f, 0.0f, 0.0f, 0.0f), Vec4(0.0f, 1.0f, 0.0f, 0.0f), Vec4(0.0f, 0.0f, 1.0f, 0.0f), Vec4(0.0f, 0.0f, 0.0f, 1.0f)); }
 	CUDA_CALLABLE inline Mat4 static Scale(Vec3 s) { return Mat4(Mat3::Scale(s)); }
 	CUDA_CALLABLE inline Mat4 static Scale(Vec4 s);
@@ -197,6 +199,85 @@ CUDA_CALLABLE inline Mat4& operator-=(Mat4& lhs, const Mat4& rhs) { return lhs =
 CUDA_CALLABLE inline Mat4& operator*=(Mat4& lhs, const Mat4& rhs) { return lhs = lhs * rhs; }
 
 CUDA_CALLABLE inline Mat4 Mat4::transpose() const { return MatrixTranspose(*this); }
+CUDA_CALLABLE inline Real Mat4::determinant() const {
+	return	cols[0][3] * cols[1][2] * cols[2][1] * cols[3][0] -
+			cols[0][2] * cols[1][3] * cols[2][1] * cols[3][0] -
+			cols[0][3] * cols[1][1] * cols[2][2] * cols[3][0] +
+			cols[0][1] * cols[1][3] * cols[2][2] * cols[3][0] +
+			cols[0][2] * cols[1][1] * cols[2][3] * cols[3][0] -
+			cols[0][1] * cols[1][2] * cols[2][3] * cols[3][0] -
+			cols[0][3] * cols[1][2] * cols[2][0] * cols[3][1] +
+			cols[0][2] * cols[1][3] * cols[2][0] * cols[3][1] +
+			cols[0][3] * cols[1][0] * cols[2][2] * cols[3][1] -
+			cols[0][0] * cols[1][3] * cols[2][2] * cols[3][1] -
+			cols[0][2] * cols[1][0] * cols[2][3] * cols[3][1] +
+			cols[0][0] * cols[1][2] * cols[2][3] * cols[3][1] +
+			cols[0][3] * cols[1][1] * cols[2][0] * cols[3][2] -
+			cols[0][1] * cols[1][3] * cols[2][0] * cols[3][2] -
+			cols[0][3] * cols[1][0] * cols[2][1] * cols[3][2] +
+			cols[0][0] * cols[1][3] * cols[2][1] * cols[3][2] +
+			cols[0][1] * cols[1][0] * cols[2][3] * cols[3][2] -
+			cols[0][0] * cols[1][1] * cols[2][3] * cols[3][2] -
+			cols[0][2] * cols[1][1] * cols[2][0] * cols[3][3] +
+			cols[0][1] * cols[1][2] * cols[2][0] * cols[3][3] +
+			cols[0][2] * cols[1][0] * cols[2][1] * cols[3][3] -
+			cols[0][0] * cols[1][2] * cols[2][1] * cols[3][3] -
+			cols[0][1] * cols[1][0] * cols[2][2] * cols[3][3] +
+			cols[0][0] * cols[1][1] * cols[2][2] * cols[3][3];
+}
+CUDA_CALLABLE inline Mat4 Mat4::inverse() const {
+	Mat4 r;
+	r[0][0] =	cols[1][2] * cols[2][3] * cols[3][1] - cols[1][3] * cols[2][2] * cols[3][1] +
+				cols[1][3] * cols[2][1] * cols[3][2] - cols[1][1] * cols[2][3] * cols[3][2] -
+				cols[1][2] * cols[2][1] * cols[3][3] + cols[1][1] * cols[2][2] * cols[3][3];
+	r[0][1] =	cols[0][3] * cols[2][2] * cols[3][1] - cols[0][2] * cols[2][3] * cols[3][1] -
+				cols[0][3] * cols[2][1] * cols[3][2] + cols[0][1] * cols[2][3] * cols[3][2] +
+				cols[0][2] * cols[2][1] * cols[3][3] - cols[0][1] * cols[2][2] * cols[3][3];
+	r[0][2] =	cols[0][2] * cols[1][3] * cols[3][1] - cols[0][3] * cols[1][2] * cols[3][1] +
+				cols[0][3] * cols[1][1] * cols[3][2] - cols[0][1] * cols[1][3] * cols[3][2] -
+				cols[0][2] * cols[1][1] * cols[3][3] + cols[0][1] * cols[1][2] * cols[3][3];
+	r[0][3] =	cols[0][3] * cols[1][2] * cols[2][1] - cols[0][2] * cols[1][3] * cols[2][1] -
+				cols[0][3] * cols[1][1] * cols[2][2] + cols[0][1] * cols[1][3] * cols[2][2] +
+				cols[0][2] * cols[1][1] * cols[2][3] - cols[0][1] * cols[1][2] * cols[2][3];
+	r[1][0] =	cols[1][3] * cols[2][2] * cols[3][0] - cols[1][2] * cols[2][3] * cols[3][0] -
+				cols[1][3] * cols[2][0] * cols[3][2] + cols[1][0] * cols[2][3] * cols[3][2] +
+				cols[1][2] * cols[2][0] * cols[3][3] - cols[1][0] * cols[2][2] * cols[3][3];
+	r[1][1] =	cols[0][2] * cols[2][3] * cols[3][0] - cols[0][3] * cols[2][2] * cols[3][0] +
+				cols[0][3] * cols[2][0] * cols[3][2] - cols[0][0] * cols[2][3] * cols[3][2] -
+				cols[0][2] * cols[2][0] * cols[3][3] + cols[0][0] * cols[2][2] * cols[3][3];
+	r[1][2] =	cols[0][3] * cols[1][2] * cols[3][0] - cols[0][2] * cols[1][3] * cols[3][0] -
+				cols[0][3] * cols[1][0] * cols[3][2] + cols[0][0] * cols[1][3] * cols[3][2] +
+				cols[0][2] * cols[1][0] * cols[3][3] - cols[0][0] * cols[1][2] * cols[3][3];
+	r[1][3] =	cols[0][2] * cols[1][3] * cols[2][0] - cols[0][3] * cols[1][2] * cols[2][0] +
+				cols[0][3] * cols[1][0] * cols[2][2] - cols[0][0] * cols[1][3] * cols[2][2] -
+				cols[0][2] * cols[1][0] * cols[2][3] + cols[0][0] * cols[1][2] * cols[2][3];
+	r[2][0] =	cols[1][1] * cols[2][3] * cols[3][0] - cols[1][3] * cols[2][1] * cols[3][0] +
+				cols[1][3] * cols[2][0] * cols[3][1] - cols[1][0] * cols[2][3] * cols[3][1] -
+				cols[1][1] * cols[2][0] * cols[3][3] + cols[1][0] * cols[2][1] * cols[3][3];
+	r[2][1] =	cols[0][3] * cols[2][1] * cols[3][0] - cols[0][1] * cols[2][3] * cols[3][0] -
+				cols[0][3] * cols[2][0] * cols[3][1] + cols[0][0] * cols[2][3] * cols[3][1] +
+				cols[0][1] * cols[2][0] * cols[3][3] - cols[0][0] * cols[2][1] * cols[3][3];
+	r[2][2] =	cols[0][1] * cols[1][3] * cols[3][0] - cols[0][3] * cols[1][1] * cols[3][0] +
+				cols[0][3] * cols[1][0] * cols[3][1] - cols[0][0] * cols[1][3] * cols[3][1] -
+				cols[0][1] * cols[1][0] * cols[3][3] + cols[0][0] * cols[1][1] * cols[3][3];
+	r[2][3] =	cols[0][3] * cols[1][1] * cols[2][0] - cols[0][1] * cols[1][3] * cols[2][0] -
+				cols[0][3] * cols[1][0] * cols[2][1] + cols[0][0] * cols[1][3] * cols[2][1] +
+				cols[0][1] * cols[1][0] * cols[2][3] - cols[0][0] * cols[1][1] * cols[2][3];
+	r[3][0] =	cols[1][2] * cols[2][1] * cols[3][0] - cols[1][1] * cols[2][2] * cols[3][0] -
+				cols[1][2] * cols[2][0] * cols[3][1] + cols[1][0] * cols[2][2] * cols[3][1] +
+				cols[1][1] * cols[2][0] * cols[3][2] - cols[1][0] * cols[2][1] * cols[3][2];
+	r[3][1] =	cols[0][1] * cols[2][2] * cols[3][0] - cols[0][2] * cols[2][1] * cols[3][0] +
+				cols[0][2] * cols[2][0] * cols[3][1] - cols[0][0] * cols[2][2] * cols[3][1] -
+				cols[0][1] * cols[2][0] * cols[3][2] + cols[0][0] * cols[2][1] * cols[3][2];
+	r[3][2] =	cols[0][2] * cols[1][1] * cols[3][0] - cols[0][1] * cols[1][2] * cols[3][0] -
+				cols[0][2] * cols[1][0] * cols[3][1] + cols[0][0] * cols[1][2] * cols[3][1] +
+				cols[0][1] * cols[1][0] * cols[3][2] - cols[0][0] * cols[1][1] * cols[3][2];
+	r[3][3] =	cols[0][1] * cols[1][2] * cols[2][0] - cols[0][2] * cols[1][1] * cols[2][0] +
+				cols[0][2] * cols[1][0] * cols[2][1] - cols[0][0] * cols[1][2] * cols[2][1] -
+				cols[0][1] * cols[1][0] * cols[2][2] + cols[0][0] * cols[1][1] * cols[2][2];
+	r *= 1.0f / determinant();
+	return r;
+}
 CUDA_CALLABLE inline Mat4 Mat4::Translate(const Vec3& loc)
 {
 	auto res = Mat4::Identity();

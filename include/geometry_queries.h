@@ -8,7 +8,7 @@
 #include "primitives.h"
 
 template<typename T>
-CUDA_CALLABLE inline void swap(T& t1, T& t2)
+CUDA_CALLABLE void swap(T& t1, T& t2)
 {
 	T tmp = t2;
 	t2 = t1;

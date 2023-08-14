@@ -14,9 +14,9 @@ CUDA_CALLABLE inline void expandBits(int64_t& bits)
 // use 21 bit per coordinate, the range of coordinates should be limited in [0.0, 1.0]
 CUDA_CALLABLE inline int64_t getMortonCode(Vec3& point)
 {
-	int64_t ix = (*reinterpret_cast<int32_t*>(&point.x) >> 2) & 0x1ffffflu;
-	int64_t iy = (*reinterpret_cast<int32_t*>(&point.y) >> 2) & 0x1ffffflu;
-	int64_t iz = (*reinterpret_cast<int32_t*>(&point.z) >> 2) & 0x1ffffflu;
+	int64_t ix = (*(int32_t*)(&point.x) >> 2) & 0x1ffffflu;
+	int64_t iy = (*(int32_t*)(&point.y) >> 2) & 0x1ffffflu;
+	int64_t iz = (*(int32_t*)(&point.z) >> 2) & 0x1ffffflu;
 
 	expandBits(ix);
 	expandBits(iy);
@@ -82,7 +82,14 @@ __device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherE
 	return split;
 }
 
-__global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHNode* lNodes, BVHNode* iNodes, NodeState* states, uint32_t size)
+struct NodeState
+{
+	int lock;
+	int writeTimes;
+};
+
+__global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHNode* lNodes, 
+	BVHNode* iNodes, NodeState* states, uint32_t size)
 {
 	uint32_t tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
 	uint32_t bid = blockIdx.x + blockIdx.y * gridDim.x;
@@ -92,7 +99,8 @@ __global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHN
 
 	__shared__ BBox boxes[256];
 
-	boxes[tidLocal] = BBox(vertices[3 * tidGlobal], vertices[3 * tidGlobal + 1], vertices[3 * tidGlobal + 2]);
+	boxes[tidLocal] = BBox(vertices[indices[3 * tidGlobal]], vertices[indices[3 * tidGlobal + 1]],
+		vertices[indices[3 * tidGlobal + 2]]);
 	Vec3 centroid = boxes[tidLocal].center();
 	keys[tidGlobal] = getMortonCode(centroid);
 	lNodes[tidGlobal].box = boxes[tidLocal];
@@ -102,8 +110,6 @@ __global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHN
 		states[tidGlobal].writeTimes = 0;
 	}
 }
-
-// thrust::sort_by_keys
 
 __global__ void computeNodeRange(BVHNode* iNodes, BVHNode* lNodes, int64_t* keys, int32_t size)
 {
@@ -196,5 +202,5 @@ void BVH::construct(thrust::device_vector<Vec3>& vertices, thrust::device_vector
 	initNodes KERNEL_DIM(gridSize, blkSize) (verticesPtr, indicesPtr, keysPtr, lNodesPtr, iNodesPtr, statePtr, size);
 	thrust::sort_by_key(m_keys.begin(), m_keys.end(), m_nodes.begin() + size - 1);
 	computeNodeRange KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, keysPtr, size);
-	computeBBox(iNodesPtr, lNodesPtr, statePtr, size);
+	computeBBox KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, statePtr, size);
 }

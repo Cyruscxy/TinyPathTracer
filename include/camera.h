@@ -39,6 +39,9 @@ public:
 			Vec4(0.0f, 0.0f, -2.0f * n,  0.0f));
 	}
 
+	Real getVFov() const { return m_verticalFOV; }
+	Real getAspRatio() const { return m_aspectRatio; }
+
 private:
 	std::shared_ptr<Transform> m_transform;
 

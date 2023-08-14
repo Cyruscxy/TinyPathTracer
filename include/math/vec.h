@@ -3,15 +3,44 @@
 #ifndef Vec_H
 #define Vec_H
 
+
 #ifdef __CUDACC__ 
 #define CUDA_CALLABLE __host__ __device__
 #include "intellisense_cuda.h"
+
+template<typename T>
+CUDA_CALLABLE inline T frsqrt(T x)
+{
+	if constexpr (sizeof(T) == sizeof(float))
+	{
+		return rqsrtf(x);
+	}
+	else if constexpr (sizeof(T) == sizeof(double))
+	{
+		return rqsrt(x);
+	}
+}
+
 #else
 #define CUDA_CALLABLE 
 #include <algorithm>
+
+float frsqrt(float num)
+{
+	int32_t i;
+	float x2, y;
+	const float threeHalfs = 1.5f;
+
+	x2 = num * 0.5f;
+	y = num;
+	i = *(int32_t*)&y;
+	i = 0x5f3759df - (i >> 1);
+	y = *(float*)&i;
+	y = y * (threeHalfs - (x2 * y * y));
+	return y;
+}
 #endif
 
-#include <cfloat>
 typedef float Real;
 #define REAL_MAX FLT_MAX	
 typedef unsigned int Index;
@@ -24,6 +53,13 @@ constexpr Real Rad = PI / 180.f;
 constexpr Real Deg = 180.f / PI;
 }
 
+template<typename T>
+CUDA_CALLABLE inline T max(T x, T y) { return x > y ? x : y; }
+template<typename T>
+CUDA_CALLABLE inline T min(T x, T y) { return x < y ? x : y; }
+template<typename T>
+CUDA_CALLABLE inline T clamp(T x, T upperBound, T lowerBound) { return max(min(x, upperBound), lowerBound); }
+
 struct Vec2
 {
 	CUDA_CALLABLE inline Vec2() : x(0.0f), y(0.0f) {}
@@ -34,7 +70,7 @@ struct Vec2
 	CUDA_CALLABLE inline Real& operator[](Index index) { return (&x)[index]; }
 	CUDA_CALLABLE inline Vec2 reciprocal() const { return Vec2(1.0f / x, 1.0f / y); }
 	CUDA_CALLABLE inline Real norm2() const { return x * x + y * y; }
-	CUDA_CALLABLE inline Real norm() const { return sqrtf(norm2()); }
+	CUDA_CALLABLE inline Real norm() const { return sqrt(norm2()); }
 
 	Real x, y;
 };
@@ -55,8 +91,9 @@ CUDA_CALLABLE inline Vec2& operator/=(Vec2& lhs, Real rhs) { return lhs = lhs / 
 
 CUDA_CALLABLE inline Real dot(const Vec2& lhs, const Vec2& rhs) { return lhs.x * rhs.x + lhs.y * rhs.y; }
 CUDA_CALLABLE inline Real cross(const Vec2& lhs, const Vec2& rhs) { return lhs.x * rhs.y - lhs.y * rhs.x; }
-CUDA_CALLABLE inline Vec2 hmax(const Vec2& lhs, const Vec2& rhs) { return Vec2(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y)); }
-CUDA_CALLABLE inline Vec2 hmin(const Vec2& lhs, const Vec2& rhs) { return Vec2(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y)); }
+CUDA_CALLABLE inline Vec2 hmax(const Vec2& lhs, const Vec2& rhs) { return Vec2(max(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y)); }
+CUDA_CALLABLE inline Vec2 hmin(const Vec2& lhs, const Vec2& rhs) { return Vec2(min(lhs.x, rhs.x), fminf(lhs.y, rhs.y)); }
+CUDA_CALLABLE inline Vec2 normalize(const Vec2& v) { return v * frsqrt(v.norm2()); }
 
 struct Vec3
 {
@@ -69,7 +106,7 @@ struct Vec3
 	CUDA_CALLABLE inline Real& operator[](Index index) { return (&x)[index]; }
 	CUDA_CALLABLE inline Vec3 reciprocal() const { return Vec3(1.0f / x, 1.0f / y, 1.0f / z); }
 	CUDA_CALLABLE inline Real norm2() const { return x * x + y * y + z * z; }
-	CUDA_CALLABLE inline Real norm() const { return sqrtf(norm2()); }
+	CUDA_CALLABLE inline Real norm() const { return sqrt(norm2()); }
 
 	Real x, y, z;
 };
@@ -90,9 +127,9 @@ CUDA_CALLABLE inline Vec3& operator/=(Vec3& lhs, Real rhs) { return lhs = lhs / 
 
 CUDA_CALLABLE inline Real dot(const Vec3& lhs, const Vec3& rhs) { return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z; }
 CUDA_CALLABLE inline Vec3 cross(const Vec3& lhs, const Vec3& rhs) { return Vec3(lhs.y * rhs.z - lhs.z * rhs.y, lhs.z * rhs.x - lhs.x * rhs.z, lhs.x * rhs.y - lhs.y * rhs.x); }
-CUDA_CALLABLE inline Vec3 hmax(const Vec3& lhs, const Vec3& rhs) { return Vec3(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y), fmaxf(lhs.z, rhs.z)); }
-CUDA_CALLABLE inline Vec3 hmin(const Vec3& lhs, const Vec3& rhs) { return Vec3(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y), fminf(lhs.z, rhs.z)); }
-
+CUDA_CALLABLE inline Vec3 hmax(const Vec3& lhs, const Vec3& rhs) { return Vec3(max(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y), fmaxf(lhs.z, rhs.z)); }
+CUDA_CALLABLE inline Vec3 hmin(const Vec3& lhs, const Vec3& rhs) { return Vec3(min(lhs.x, rhs.x), fminf(lhs.y, rhs.y), fminf(lhs.z, rhs.z)); }
+CUDA_CALLABLE inline Vec3 normalize(const Vec3& v) { return v * frsqrt(v.norm2()); }
 
 struct Vec4
 {
@@ -128,6 +165,6 @@ CUDA_CALLABLE inline Vec4& operator/=(Vec4& lhs, Real rhs) { return lhs = lhs / 
 CUDA_CALLABLE inline Real dot(const Vec4& lhs, const Vec4& rhs) { return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z + lhs.w * rhs.w; }
 CUDA_CALLABLE inline Vec4 hmax(const Vec4& lhs, const Vec4& rhs) { return Vec4(fmaxf(lhs.x, rhs.x), fmaxf(lhs.y, rhs.y), fmaxf(lhs.z, rhs.z), fmaxf(lhs.w, rhs.w)); }
 CUDA_CALLABLE inline Vec4 hmin(const Vec4& lhs, const Vec4& rhs) { return Vec4(fminf(lhs.x, rhs.x), fminf(lhs.y, rhs.y), fminf(lhs.z, rhs.z), fminf(lhs.w, rhs.w)); }
-
+CUDA_CALLABLE inline Vec4 normalize(const Vec4& v) { return v * frsqrt(v.norm2()); }
 
 #endif

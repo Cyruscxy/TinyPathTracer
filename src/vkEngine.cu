@@ -111,19 +111,12 @@ void VkEngine::init()
 	glfwSetFramebufferSizeCallback(m_window, framebufferResizeCallback);
 
 	initVulkan();
-
 	initSwapchain();
-
 	initCommands();
-
 	initDefaultRenderPass();
-
 	initFramebuffers();
-
 	initSyncStructs();
-
 	createExternalImage();
-
 	initCuda();
 
 	m_isInitialized = true;

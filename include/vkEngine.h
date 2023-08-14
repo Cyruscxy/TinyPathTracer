@@ -10,6 +10,8 @@
 #include<vulkan/vulkan_win32.h>
 #include<vector>
 
+#include "intellisense_cuda.h"
+
 class VkEngine
 {
 public:
@@ -48,10 +50,10 @@ public:
 	VkSemaphore							m_renderSemaphore;
 	VkFence								m_renderFence;
 
-	//cudaStream_t						m_stream;
-	//cudaExternalSemaphore_t				m_cudaWaitSemaphore;
-	//cudaExternalSemaphore_t				m_cudaSignalSemaphore;
-	//cudaExternalSemaphore_t				m_cudaTimelineSemaphore;
+	//cudaStream_t						  m_stream;
+	//cudaExternalSemaphore_t			  m_cudaWaitSemaphore;
+	//cudaExternalSemaphore_t			  m_cudaSignalSemaphore;
+	//cudaExternalSemaphore_t			  m_cudaTimelineSemaphore;
 	cudaExternalMemory_t				m_cudaExternalMem;
 	unsigned char*						m_cudaFramebufferMem;
 

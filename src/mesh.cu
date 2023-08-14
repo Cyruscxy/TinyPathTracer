@@ -68,7 +68,7 @@ Scene::Scene(const std::string& filename, const std::string& type)
     }
     else
     {
-        throw std::runtime_error("Unsupported file format. Only support .obj/.gltf/.glb file.");
+        throw std::runtime_error("Unsupported file format. Only support .gltf file.");
     }
 }
 
@@ -240,6 +240,38 @@ void Scene::readFromGLTF(const std::string& filename)
                 }
             }
             currentObj.m_material = material.name;
+
+            // read transform 
+            auto& rQuat = node.rotation;
+            auto& s = node.scale;
+            auto& loc = node.translation;
+            Quat rotationQuat;
+            Vec3 scale;
+            Vec3 translation;
+            if (!rQuat.empty())
+            {
+                rotationQuat = Quat(
+                    static_cast<Real>(rQuat[0]),
+                    static_cast<Real>(rQuat[1]),
+                    static_cast<Real>(rQuat[2]),
+                    static_cast<Real>(rQuat[3]));
+            }
+            if (!s.empty())
+            {
+                scale = Vec3(
+                    static_cast<Real>(s[0]),
+                    static_cast<Real>(s[1]),
+                    static_cast<Real>(s[2]));
+            }
+            if (!loc.empty())
+            {
+                translation = Vec3(
+                    static_cast<Real>(loc[0]),
+                    static_cast<Real>(loc[1]),
+                    static_cast<Real>(loc[2]));
+            }
+            currentObj.m_transform = std::make_shared<Transform>(translation, rotationQuat, scale);
+            // TODO: Hierarchy transform support
         }
     }
 }
@@ -263,6 +295,8 @@ DeviceScene Scene::copySceneToDevice()
     deviceScene.texCoords.resize(verticesCount);
     deviceScene.materials.resize(m_materials.size());
     deviceScene.materialsLUT.resize(m_meshes.size());
+    deviceScene.vertTrans.resize(m_meshes.size());
+    deviceScene.normalTrans.resize(m_meshes.size());
 
     uint32_t currentIndicesCount = 0;
     uint32_t currentVerticesCount = 0;
@@ -307,6 +341,26 @@ DeviceScene Scene::copySceneToDevice()
     }
 
     thrust::copy(hostMtlLUT.begin(), hostMtlLUT.end(), deviceScene.materialsLUT.begin());
+
+    // copy transform matrices
+    std::vector<Mat4> vertTrans;
+    std::vector<Mat4> normalTrans;
+
+    auto normal_to_world = [](Mat4 const& l2w)-> Mat4 {
+        return Mat4{
+                Vec4 { l2w[0][0], l2w[0][1], l2w[0][2], 0.0f },
+                Vec4 { l2w[1][0], l2w[1][1], l2w[1][2], 0.0f },
+                Vec4 { l2w[2][0], l2w[2][1], l2w[2][2], 0.0f },
+                Vec4 {      0.0f,      0.0f,      0.0f, 1.0f }
+            }.transpose().inverse();
+    };
+    for ( auto& m : m_meshes )
+    {
+        vertTrans.push_back(m.m_transform->localToWorld());
+        normalTrans.push_back(normal_to_world(vertTrans.back()));
+    }
+    thrust::copy(vertTrans.begin(), vertTrans.end(), deviceScene.vertTrans.begin());
+    thrust::copy(normalTrans.begin(), normalTrans.end(), deviceScene.normalTrans.begin());
 
     return deviceScene;
 }

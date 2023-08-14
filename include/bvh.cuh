@@ -7,7 +7,6 @@
 #include "primitives.h"
 #include <cstdint>
 #include "intellisense_cuda.h"
-#include <thrust/detail/mpl/math.h>
 
 // AABB
 struct BBox
@@ -32,12 +31,6 @@ struct BBox
 	}
 
 	Vec3 m_min, m_max;
-};
-
-struct NodeState
-{
-	int lock;
-	int writeTimes;
 };
 
 struct Intern
