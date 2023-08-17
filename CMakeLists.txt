@@ -9,7 +9,6 @@ set(VULKAN_GLSLC_EXE "${VULKAN_PATH}/Bin/glslc.exe")
 find_package(CUDAToolkit 11.0 REQUIRED)
 
 include_directories(CUDA_INCLUDE_DIRS)
-#message(STATUS ${CUDA_INCLUDE_DIRS})
 
 set(VULKAN_LIB_LIST "vulkan-1.lib")
 
@@ -56,7 +55,8 @@ foreach(header IN LISTS THIRD_PARTY_HEADERS)
 endforeach()
 
 set(CMAKE_CXX_STANDARD 17) 
-
+add_definitions(-DPATH_TO_MESH_DIR="${CMAKE_CURRENT_SOURCE_DIR}/input/")
+add_compile_options(-G)
 add_executable(tinyPathTracer ${CXX_SRCS} ${CU_SRCS} ${HEADERS} ${THIRD_PARTY_SRCS} ${THIRD_PARTY_SRCS})
 
 target_link_libraries(tinyPathTracer ${CMAKE_CURRENT_SOURCE_DIR}/lib/GLFW/glfw3.lib ${VULKAN_LIB_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/lib/FreeImage/FreeImage.lib)

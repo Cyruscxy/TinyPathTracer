@@ -1,6 +1,6 @@
 #include <cmath>
 #include "texture.h"
-#include "mesh.h"
+#include "mesh.cuh"
 
 #include "intellisense_cuda.h"
 
@@ -101,7 +101,7 @@ Texture::Texture(const std::string& file) : Picture(file)
 
 		dim3 blkDim(16, 16);
 		dim3 gridDim((width + blkDim.x - 1) / blkDim.x, (height + blkDim.y - 1) / blkDim.y);
-		textureDownsampling KERNEL_DIM(gridDim, blockDim) (surfaceOut, texIn, width, height);
+		textureDownsampling KERNEL_DIM(gridDim, blkDim) (surfaceOut, texIn, width, height);
 
 		CudaCheck(cudaDeviceSynchronize());
 		CudaCheck(cudaDestroyTextureObject(texIn));

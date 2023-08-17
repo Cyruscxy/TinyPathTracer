@@ -4,6 +4,8 @@
 #define DISPLAYER_H
 
 #define GLFW_INCLUDE_VULKAN
+#include <functional>
+
 #include "GLFW/glfw3.h"
 
 #include<Windows.h>
@@ -64,10 +66,10 @@ public:
 	void cleanup();
 
 	// draw loop
-	void draw();
+	void draw(std::function<void(unsigned char* framebuffer)> renderJob);
 
 	// run main loop
-	void run();
+	void run(std::function<void(unsigned char* framebuffer)> renderJob);
 
 private:
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height);

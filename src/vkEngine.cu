@@ -2,6 +2,8 @@
 #include "vkbootstrap/VkBootstrap.h"
 #include "vkInitializers.h"
 #include <cmath>
+#include <iostream>
+
 #include "intellisense_cuda.h"
 
 __global__ void setWhite(int width, int height, unsigned char* data, float flash)
@@ -175,7 +177,7 @@ void VkEngine::cleanup()
 	}
 }
 
-void VkEngine::draw()
+void VkEngine::draw(std::function<void(unsigned char* framebuffer)> renderJob)
 {
 
 	if (vkWaitForFences(m_logicalDevice, 1, &m_renderFence, true, 1000000000) != VK_SUCCESS)
@@ -239,7 +241,7 @@ void VkEngine::draw()
 	copyRegion.dstSubresource.mipLevel = 0;
 
 	// actually do the render job by cuda
-	render();
+	renderJob(m_cudaFramebufferMem);
 
 	recordImageLayoutTransition(m_swapchainImages[swapchainImageIndex], m_mainCommandBuffer, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 	vkCmdCopyImage(cmd, m_externalImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_swapchainImages[swapchainImageIndex],
@@ -289,12 +291,13 @@ void VkEngine::draw()
 	++m_numFrames;
 }
 
-void VkEngine::run()
+void VkEngine::run(std::function<void(unsigned char* framebuffer)> renderJob)
 {
 	while ( !glfwWindowShouldClose(m_window) )
 	{
 		glfwPollEvents();
-		draw();
+		draw(renderJob);
+		std::cout << "1 frame" << std::endl;
 	}
 }
 

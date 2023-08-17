@@ -78,6 +78,10 @@ struct MtlInterval
 
 struct DeviceScene
 {
+	DeviceScene(size_t verticesCnt, size_t indicesCnt, size_t nObjs, size_t nMtls) : indices(indicesCnt),
+		vertices(verticesCnt), normals(verticesCnt), texCoords(verticesCnt), materials(nMtls),
+		materialsLUT(nObjs), vertTrans(nObjs), normalTrans(nObjs) {}
+
 	thrust::device_vector<uint32_t> indices;
 	thrust::device_vector<Vec3> vertices;
 	thrust::device_vector<Vec3> normals;

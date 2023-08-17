@@ -4,8 +4,7 @@
 #define PRIMITIVES_H
 
 #include "math/vec.h"
-
-
+#include "bvh.cuh"
 
 struct Sphere
 {

@@ -21,10 +21,9 @@ private:
 	VkEngine m_displayer;
 	int m_width;
 	int m_height;
-	thrust::device_vector<Ray> m_rays;
 	thrust::device_vector<curandState> m_randStates;
 
-	void doTrace(DeviceScene& scene, Camera& camera, int nSamplesPerPixel);
+	void doTrace(DeviceScene& scene, Camera& camera, unsigned char* framebuffer, int nSamplesPerPixel);
 };
 
 #endif

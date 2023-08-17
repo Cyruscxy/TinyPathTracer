@@ -197,6 +197,7 @@ CUDA_CALLABLE inline Mat4 operator-(const Mat4& m) { return Mat4(m[0] * -1.0f, m
 CUDA_CALLABLE inline Mat4& operator+=(Mat4& lhs, const Mat4& rhs) { return lhs = lhs + rhs; }
 CUDA_CALLABLE inline Mat4& operator-=(Mat4& lhs, const Mat4& rhs) { return lhs = lhs - rhs; }
 CUDA_CALLABLE inline Mat4& operator*=(Mat4& lhs, const Mat4& rhs) { return lhs = lhs * rhs; }
+CUDA_CALLABLE inline Mat4& operator*=(Mat4& lhs, const Real& s) { return lhs = lhs * s; }
 
 CUDA_CALLABLE inline Mat4 Mat4::transpose() const { return MatrixTranspose(*this); }
 CUDA_CALLABLE inline Real Mat4::determinant() const {
@@ -275,7 +276,8 @@ CUDA_CALLABLE inline Mat4 Mat4::inverse() const {
 	r[3][3] =	cols[0][1] * cols[1][2] * cols[2][0] - cols[0][2] * cols[1][1] * cols[2][0] +
 				cols[0][2] * cols[1][0] * cols[2][1] - cols[0][0] * cols[1][2] * cols[2][1] -
 				cols[0][1] * cols[1][0] * cols[2][2] + cols[0][0] * cols[1][1] * cols[2][2];
-	r *= 1.0f / determinant();
+	auto det = determinant();
+	r *= (1.0f / det);
 	return r;
 }
 CUDA_CALLABLE inline Mat4 Mat4::Translate(const Vec3& loc)

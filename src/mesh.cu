@@ -1,6 +1,10 @@
 #include "mesh.cuh"
 #include <fstream>
 #include <sstream>
+
+#define TINYGLTF_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <tinygltf/tiny_gltf.h>
 #include <tinygltf/json.hpp>
 
@@ -52,9 +56,10 @@ namespace
         uint32_t offset;
 
         __host__ __device__
-            void operator()(uint32_t& indices)
+            uint32_t operator()(uint32_t indices)
         {
             indices += offset;
+            return indices;
         }
     };
 }
@@ -80,7 +85,7 @@ void Scene::readFromGLTF(const std::string& filename)
     std::string warn;
 
     loader.SetStoreOriginalJSONForExtrasAndExtensions(true);
-    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filename);
+    bool ret = loader.LoadASCIIFromFile(&model, &err, &warn, filename);
 
     if (!ret)
     {
@@ -91,6 +96,9 @@ void Scene::readFromGLTF(const std::string& filename)
 
     std::vector<std::string> extensions;
     for ( auto ext : model.extensionsUsed )
+    {
+        extensions.push_back(ext);
+    }
 
     for (auto node : model.nodes)
     {
@@ -123,6 +131,10 @@ void Scene::readFromGLTF(const std::string& filename)
                         static_cast<Real>(s[0]),
                         static_cast<Real>(s[1]),
                         static_cast<Real>(s[2]));
+                }
+                else
+                {
+                    scale = Vec3(1.0f);
                 }
                 if ( !loc.empty() )
                 {
@@ -206,40 +218,43 @@ void Scene::readFromGLTF(const std::string& filename)
             currentObj.readTexcoordsFromRawPtr(texcoords, count);
 
             // read material
-            auto material = model.materials[mesh.primitives[0].material];
-            if ( m_materials.find(material.name) == m_materials.end() )
+            if ( !model.materials.empty() )
             {
-                auto& currentMaterial = m_materials[material.name];
-                currentMaterial.roughness = static_cast<Real>(material.pbrMetallicRoughness.roughnessFactor);
-                currentMaterial.metallic = static_cast<Real>(material.pbrMetallicRoughness.metallicFactor);
-                currentMaterial.baseColor = Vec3(
-                    static_cast<Real>(material.pbrMetallicRoughness.baseColorFactor[0]),
-                    static_cast<Real>(material.pbrMetallicRoughness.baseColorFactor[1]),
-                    static_cast<Real>(material.pbrMetallicRoughness.baseColorFactor[2]));
-
-                if ( !material.extensions_json_string.empty() )
+                auto material = model.materials[mesh.primitives[0].material];
+                if (m_materials.find(material.name) == m_materials.end())
                 {
-                    using json = nlohmann::json;
-                    json extension = json::parse(material.extensions_json_string);
+                    auto& currentMaterial = m_materials[material.name];
+                    currentMaterial.roughness = static_cast<Real>(material.pbrMetallicRoughness.roughnessFactor);
+                    currentMaterial.metallic = static_cast<Real>(material.pbrMetallicRoughness.metallicFactor);
+                    currentMaterial.baseColor = Vec3(
+                        static_cast<Real>(material.pbrMetallicRoughness.baseColorFactor[0]),
+                        static_cast<Real>(material.pbrMetallicRoughness.baseColorFactor[1]),
+                        static_cast<Real>(material.pbrMetallicRoughness.baseColorFactor[2]));
 
-                    for ( auto item : extension.items() )
+                    if (!material.extensions_json_string.empty())
                     {
-                        if ( item.key() == "KHR_materials_transmission")
+                        using json = nlohmann::json;
+                        json extension = json::parse(material.extensions_json_string);
+
+                        for (auto item : extension.items())
                         {
-                            currentMaterial.specular = 1.0f - static_cast<Real>(item.value()["transmissionFactor"]) / 5.0f;
-                        }
-                        if ( item.key() == "KHR_materials_emissive_strength" )
-                        {
-                            currentMaterial.emissionFactor = item.value()["emissiveStrength"];
-                        }
-                        if ( item.key() == "KHR_materials_ior" )
-                        {
-                            currentMaterial.eta = item.value()["ior"];
+                            if (item.key() == "KHR_materials_transmission")
+                            {
+                                currentMaterial.specular = 1.0f - static_cast<Real>(item.value()["transmissionFactor"]) / 5.0f;
+                            }
+                            if (item.key() == "KHR_materials_emissive_strength")
+                            {
+                                currentMaterial.emissionFactor = item.value()["emissiveStrength"];
+                            }
+                            if (item.key() == "KHR_materials_ior")
+                            {
+                                currentMaterial.eta = item.value()["ior"];
+                            }
                         }
                     }
                 }
+                currentObj.m_material = material.name;
             }
-            currentObj.m_material = material.name;
 
             // read transform 
             auto& rQuat = node.rotation;
@@ -262,6 +277,10 @@ void Scene::readFromGLTF(const std::string& filename)
                     static_cast<Real>(s[0]),
                     static_cast<Real>(s[1]),
                     static_cast<Real>(s[2]));
+            }
+            else
+            {
+                scale = Vec3(1.0f);
             }
             if (!loc.empty())
             {
@@ -288,15 +307,7 @@ DeviceScene Scene::copySceneToDevice()
     }
 
     // allocate device memory for scene elements
-    DeviceScene deviceScene;
-    deviceScene.indices.resize(indicesCount);
-    deviceScene.vertices.resize(verticesCount);
-    deviceScene.normals.resize(verticesCount);
-    deviceScene.texCoords.resize(verticesCount);
-    deviceScene.materials.resize(m_materials.size());
-    deviceScene.materialsLUT.resize(m_meshes.size());
-    deviceScene.vertTrans.resize(m_meshes.size());
-    deviceScene.normalTrans.resize(m_meshes.size());
+    DeviceScene deviceScene(verticesCount, indicesCount, m_meshes.size(), m_materials.size());
 
     uint32_t currentIndicesCount = 0;
     uint32_t currentVerticesCount = 0;
@@ -347,17 +358,18 @@ DeviceScene Scene::copySceneToDevice()
     std::vector<Mat4> normalTrans;
 
     auto normal_to_world = [](Mat4 const& l2w)-> Mat4 {
-        return Mat4{
+        auto m = Mat4{
                 Vec4 { l2w[0][0], l2w[0][1], l2w[0][2], 0.0f },
                 Vec4 { l2w[1][0], l2w[1][1], l2w[1][2], 0.0f },
                 Vec4 { l2w[2][0], l2w[2][1], l2w[2][2], 0.0f },
-                Vec4 {      0.0f,      0.0f,      0.0f, 1.0f }
-            }.transpose().inverse();
+                Vec4 {      0.0f,      0.0f,      0.0f, 1.0f } };
+        return m.transpose().inverse();
     };
     for ( auto& m : m_meshes )
     {
         vertTrans.push_back(m.m_transform->localToWorld());
-        normalTrans.push_back(normal_to_world(vertTrans.back()));
+        auto n2w = normal_to_world(vertTrans.back());
+        normalTrans.push_back(n2w);
     }
     thrust::copy(vertTrans.begin(), vertTrans.end(), deviceScene.vertTrans.begin());
     thrust::copy(normalTrans.begin(), normalTrans.end(), deviceScene.normalTrans.begin());

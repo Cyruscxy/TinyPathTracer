@@ -9,8 +9,14 @@
 class Camera
 {
 public:
-	Camera() : m_verticalFOV(60.0f), m_aspectRatio(1.77778f), m_nearPlane(0.1f) {}
-	Camera(Real fov, Real asp, Real nearZ) : m_verticalFOV(fov), m_aspectRatio(asp), m_nearPlane(nearZ) {}
+	Camera() : m_verticalFOV(60.0f), m_aspectRatio(1.77778f), m_nearPlane(0.1f)
+	{
+		if (!m_transform) m_transform = std::make_shared<Transform>(Vec3(0.0f), Vec3(0.0f), Vec3(1.0f));
+	}
+	Camera(Real fov, Real asp, Real nearZ) : m_verticalFOV(fov), m_aspectRatio(asp), m_nearPlane(nearZ)
+	{
+		if (!m_transform) m_transform = std::make_shared<Transform>(Vec3(0.0f), Vec3(0.0f), Vec3(1.0f));
+	}
 	Camera(Vec3 loc, Vec3 angle, Vec3 s) : Camera()
 	{
 		m_transform = std::make_shared<Transform>(loc, angle, s);
@@ -39,11 +45,12 @@ public:
 			Vec4(0.0f, 0.0f, -2.0f * n,  0.0f));
 	}
 
-	Real getVFov() const { return m_verticalFOV; }
-	Real getAspRatio() const { return m_aspectRatio; }
+	[[nodiscard]] Real getVFov() const { return m_verticalFOV; }
+	[[nodiscard]] Real getAspRatio() const { return m_aspectRatio; }
+	[[nodiscard]] Real getNearPlane() const { return m_nearPlane; }
 
-private:
 	std::shared_ptr<Transform> m_transform;
+private:
 
 	Real m_verticalFOV;
 	Real m_aspectRatio;

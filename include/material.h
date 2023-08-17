@@ -82,7 +82,7 @@ struct Spectrum
 
 struct Material
 {
-	Material() :
+	CUDA_CALLABLE inline Material() :
 	baseColor(0.82f, 0.67f, 0.16f),
 	//absorption(0.0f),
 	emissionFactor(0.0f),

@@ -8,13 +8,21 @@
 #ifndef INTELLISENSE_CUDA_H
 #define INTELLISENSE_CUDA_H
 
+#include <stdexcept>
+#include <string>
+
+inline void CUDA_CHECK(cudaError state)
+{
+	if ( state != cudaError::cudaSuccess )
+	{
+        throw std::runtime_error("CUDA runtime error: " + std::to_string(state) + "\n");
+	}
+}
+
 #include <cuda.h>
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 
-#define __CUDACC__
-#include "device_functions.h"
-#include "device_double_functions.h"
 #include "texture_indirect_functions.h"
 #include "surface_indirect_functions.h"
 

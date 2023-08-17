@@ -3,10 +3,8 @@
 #ifndef BVH_H
 #define BVH_H
 
+#include "math/vec.h"
 #include <thrust/device_vector.h>
-#include "primitives.h"
-#include <cstdint>
-#include "intellisense_cuda.h"
 
 // AABB
 struct BBox
@@ -62,7 +60,7 @@ struct BVHNode
 struct BVH
 {
 	BVH() = default;
-	BVH(size_t size) : m_nodes(size - 1), m_keys(size) {}
+	BVH(size_t size) : m_nodes(2 * size - 1), m_keys(size) {}
 	thrust::device_vector<BVHNode> m_nodes;
 	thrust::device_vector<int64_t> m_keys;
 

@@ -60,11 +60,12 @@ CUDA_CALLABLE inline Mat3 Quat::RotateFromQuat(const Quat& q)
 	auto wx = q.w * q.v.x;
 	auto wy = q.w * q.v.y;
 	auto wz = q.w * q.v.z;
-	return Mat3 (
-		Vec3 ( 1.0f - 2.0f * (y2 - z2), 2.0f * (xy + wz), 2.0f * (xz - wy) ),
-		Vec3 { 2.0f * (xy - wz), 1.0f - 2.0f * (x2 - z2), 2.0f * (yz + wz) },
-		Vec3 { 2.0f * (xz + wy), 2.0f * (yz - wx), 1.0f - 2.0f * (x2 - y2) }
+	auto m = Mat3 (
+		Vec3 ( 1.0f - 2.0f * (y2 + z2), 2.0f * (xy + wz), 2.0f * (xz - wy) ),
+		Vec3 { 2.0f * (xy - wz), 1.0f - 2.0f * (x2 + z2), 2.0f * (yz + wx) },
+		Vec3 { 2.0f * (xz + wy), 2.0f * (yz - wx), 1.0f - 2.0f * (x2 + y2) }
 	);
+	return m;
 }
 
 #endif
