@@ -20,14 +20,37 @@ CUDA_CALLABLE inline void expandBits(int64_t& bits)
 	bits = (bits | bits << 2) & 0x1249249249249249;
 }
 
+CUDA_CALLABLE inline int64_t floatTo21Int(float x)
+{
+	int32_t ix = *(int32_t*)(&x);
+	int32_t exponent = (ix >> 23) & 0x000000ff;
+	exponent -= 127;
+	int32_t mantissa = (ix & 0x00ffffff) | 0x00800000;
+	int32_t sign = ix & 0x00000001;
+	sign = sign * (-2) + 1;
+	int32_t value;
+	if (exponent >= 8) value = INT32_MAX * sign;
+	else
+	{
+		if (exponent >= 0) value = mantissa << exponent;
+		else value = mantissa >> (exponent * -1);
+	}
+	uint32_t bits = *(int32_t*)(&value);
+	bits += INT32_MAX;
+	int64_t result = (bits & 0xfffffe00) >> 9;
+	return result;
+}
+
 // use 21 bit per coordinate
 // TODO: transform from float, should be more precise
 CUDA_CALLABLE inline int64_t getMortonCode(Vec3 point)
 {
-	int64_t ix = ((*(int32_t*)(&point.x)) >> 2) & 0x1ffffflu;
+	/*int64_t ix = ((*(int32_t*)(&point.x)) >> 2) & 0x1ffffflu;
 	int64_t iy = ((*(int32_t*)(&point.y)) >> 2) & 0x1ffffflu;
-	int64_t iz = ((*(int32_t*)(&point.z)) >> 2) & 0x1ffffflu;
-
+	int64_t iz = ((*(int32_t*)(&point.z)) >> 2) & 0x1ffffflu;*/
+	int64_t ix = floatTo21Int(point.x);
+	int64_t iy = floatTo21Int(point.y);
+	int64_t iz = floatTo21Int(point.z);
 	expandBits(ix);
 	expandBits(iy);
 	expandBits(iz);
@@ -106,9 +129,9 @@ struct NodeState
 __global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHNode* lNodes, 
 	BVHNode* iNodes, NodeState* states, uint32_t size)
 {
-	uint32_t tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
-	uint32_t bid = blockIdx.x + blockIdx.y * gridDim.x;
-	uint32_t tidGlobal = tidLocal + bid * blockDim.x * blockDim.y;
+	int32_t tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
+	int32_t bid = blockIdx.x + blockIdx.y * gridDim.x;
+	int32_t tidGlobal = tidLocal + bid * blockDim.x * blockDim.y;
 
 	if (tidGlobal >= size) return;
 
@@ -119,6 +142,7 @@ __global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHN
 	Vec3 centroid = boxes[tidLocal].center();
 	keys[tidGlobal] = getMortonCode(centroid);
 	lNodes[tidGlobal].box = boxes[tidLocal];
+	lNodes[tidGlobal].info.leaf.fid = tidGlobal;
 	if (tidGlobal < size - 1) {
 		iNodes[tidGlobal].box = BBox(Vec3(REAL_MAX), Vec3(-REAL_MAX));
 		states[tidGlobal].writeTimes = 0;
@@ -252,6 +276,7 @@ void BVH::construct(thrust::device_vector<Vec3>& vertices, thrust::device_vector
 	CUDA_CHECK(cudaDeviceSynchronize());
 	thrust::sort_by_key(m_keys.begin(), m_keys.end(), m_nodes.begin() + nFace - 1);
 	checkDeviceVector(m_keys);
+	checkDeviceVector(m_nodes);
 	computeNodeRange KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, keysPtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
 	computeBBox KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, statePtr, nFace);

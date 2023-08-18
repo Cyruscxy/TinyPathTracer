@@ -17,26 +17,26 @@ CUDA_CALLABLE void swap(T& t1, T& t2)
 
 CUDA_CALLABLE inline bool rayHitBBox(Ray& ray, BBox& box)
 {
-	Vec3 invDirection = ray.m_direction.reciprocal();
+	Vec3 invDir = ray.m_direction.reciprocal();
 	Vec2 tx, ty, tz; // Vec2(min, max) pair
-	Vec2 times(REAL_MAX, -REAL_MAX);
+	Vec2 times(-REAL_MAX, REAL_MAX);
 
-	tx.x = (box.m_min.x - ray.m_origin.x) * invDirection.x;
-	tx.y = (box.m_max.x - ray.m_origin.x) * invDirection.x;
+	tx.x = (box.m_min.x - ray.m_origin.x) * invDir.x;
+	tx.y = (box.m_max.x - ray.m_origin.x) * invDir.x;
 	if (tx.x > tx.y) swap(tx.x, tx.y);
 	if (times.x > tx.y || tx.x > times.y) return false;
 	times.x = max(times.x, tx.x);
 	times.y = min(times.y, tx.y);
 
-	ty.x = (box.m_min.y - ray.m_origin.y) * invDirection.y;
-	ty.y = (box.m_max.y - ray.m_origin.y) * invDirection.y;
+	ty.x = (box.m_min.y - ray.m_origin.y) * invDir.y;
+	ty.y = (box.m_max.y - ray.m_origin.y) * invDir.y;
 	if (ty.x > ty.y) swap(ty.x, ty.y);
 	if (times.x > ty.y || ty.x > times.y) return false;
 	times.x = max(times.x, ty.x);
 	times.y = min(times.y, ty.y);
 
-	tz.x = (box.m_min.z - ray.m_origin.z) * invDirection.z;
-	tz.y = (box.m_max.z - ray.m_origin.z) * invDirection.z;
+	tz.x = (box.m_min.z - ray.m_origin.z) * invDir.z;
+	tz.y = (box.m_max.z - ray.m_origin.z) * invDir.z;
 	if (tz.x > tz.y) swap(tz.x, tz.y);
 	if (times.x > tz.y || tz.x > times.y) return false;
 	times.x = max(times.x, tz.x);
@@ -68,7 +68,7 @@ CUDA_CALLABLE inline bool rayHitSphere(Ray& ray, Real raidus, Vec2& times)
 CUDA_CALLABLE inline bool rayHitTriangle(Ray& ray, const Vec3& v0, const Vec3& v1, const Vec3& v2, Real& dist)
 {
 	Vec3 e1 = v1 - v0;
-	Vec3 e2 = v2 - v1;
+	Vec3 e2 = v2 - v0;
 	Vec3 t = ray.m_origin - v0;
 	Vec3 p = cross(ray.m_direction, e2);
 	Vec3 q = cross(t, e1);

@@ -107,7 +107,7 @@ void Scene::readFromGLTF(const std::string& filename)
             auto& cameraInfo = model.cameras[node.camera];
             if ( cameraInfo.type == "perspective")
             {
-                Real yFov = static_cast<Real>(cameraInfo.perspective.yfov);
+                Real yFov = static_cast<Real>(cameraInfo.perspective.yfov); // in rad
                 Real aspectRatio = static_cast<Real>(cameraInfo.perspective.aspectRatio);
                 Real nearPlane = static_cast<Real>(cameraInfo.perspective.znear);
 

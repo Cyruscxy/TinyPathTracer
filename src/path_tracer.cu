@@ -37,33 +37,25 @@ __global__ void sampleRay(Ray* rays, int width, int height, curandState* globalS
 
 	if (pixelX >= width || pixelY >= height) return;
 
-	if ( pixelY >= 350 )
-	{
-		int i = 0;
-	}
-
 	__shared__ Mat4 c2w;
 	c2w = *cameraToWorld;
 
 	curandState* localState = globalState + tidLocal;
 	Ray* localRay = &rays[pixelX + pixelY * width];
 
-	//Vec2 pixelLocation = DeviceSampler::RectUniform(localState);
-	//Real pdf = DeviceSampler::RectPDF(pixelLocation);
-	//pixelLocation += Vec2(pixelX, pixelY); // screen space
-	//pixelLocation += Vec2(width, height) * (-0.5f);
+	Vec2 pixelLocation = DeviceSampler::RectUniform(localState);
+	pixelLocation += Vec2(pixelX, pixelY); 
+	pixelLocation *= Vec2(1.0f / width, 1.0f / height);
 
-	// Vec3 dir(pixelLocation.x, nearPlane, pixelLocation.y);
+	Real tanHalfVFov = tan( vFov * 0.5f);
+	Real sensorHeight = 2.0f * tanHalfVFov;
+	Real sensorWidth = aspectRatio * sensorHeight;
 
-	Real theta = (pixelX - 0.5f * width) / width;
-	theta = theta * MathConst::PI * 2.0f;
-	Real phi = (Real)pixelY / height;
-	phi = phi * MathConst::PI;
-	Vec3 dir(cos(theta) * sin(phi), sin(theta) * sin(phi), cos(phi));
-
+	pixelLocation *= Vec2(sensorWidth, sensorHeight);
+	Vec3 dir = Vec3(pixelLocation, 0.0f) - Vec3(0.5f * sensorWidth, 0.5f * sensorHeight, 1.0f);
 	dir = (c2w * Vec4(dir, 0.0f)).xyz();
+	localRay->m_origin = (c2w * Vec4(0.0f, 0.0f, 0.0f, 1.0f)).xyz();
 	localRay->m_direction = normalize(dir);
-	localRay->m_origin = (c2w * Vec4(0.0f, 0.0f, nearPlane, 1.0f)).xyz();
 	localRay->m_distBound = Vec2(0.0f, REAL_MAX);
 	localRay->m_distance = 0.0f;
 }
@@ -92,7 +84,7 @@ int traverseBVH(Ray& ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int
 			// Shall we do the ray-triangle test here, or later after all collected ?
 			if (rayHitTriangle(ray, vertices[vid0], vertices[vid1], vertices[vid2], hitDist))
 			{
-				if (hitDist < dist) { dist = hitDist; hitIdx = currentIdx; }
+				if (hitDist < dist) { dist = hitDist; hitIdx = fid; }
 			}
 		}
 		else
@@ -106,7 +98,7 @@ int traverseBVH(Ray& ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int
 			}
 			if (rayHitBBox(ray, nodes[rightChild].box))
 			{
-				callStacks[stackPtr] = leftChild;
+				callStacks[stackPtr] = rightChild;
 				stackPtr++;
 			}
 		}
@@ -295,7 +287,8 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 		v1 = normals[i1];
 		v2 = normals[i2];
 		Vec3 actualNormal = baryCoords.x * v0 + baryCoords.y * v1 + baryCoords.z * v2;
-		color[pixelX + pixelY * width] = Spectrum(actualNormal.habs() * 255.0f);
+		auto c = Spectrum(actualNormal.habs() * 255.0f);
+		color[pixelX + pixelY * width] = c;
 	}
 	else
 	{
@@ -383,7 +376,7 @@ void copyToFB(Spectrum* radiance, unsigned char* data, int height, int width, in
 	totalRad = totalRad / nSamplesPerPixel;
 	uchar3 rgb = totalRad.toUChar();
 
-	unsigned char* pixel = &data[offset];
+	unsigned char* pixel = &data[offset * 4];
 	pixel[0] = rgb.x;
 	pixel[1] = rgb.y;
 	pixel[2] = rgb.z;
@@ -443,22 +436,22 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	dim3 blk_config(BLK_DIM, BLK_DIM);
 	dim3 grid_config((m_width + BLK_DIM - 1) / BLK_DIM, (m_height + BLK_DIM - 1) / BLK_DIM);
 
-	checkDeviceVector(d_scene.vertices);
+	/*checkDeviceVector(d_scene.vertices);
 	checkDeviceVector(d_scene.vertTrans);
 	checkDeviceVector(d_scene.normalTrans);
 	checkDeviceVector(d_scene.indices);
-	checkDeviceVector(d_scene.materialsLUT);
+	checkDeviceVector(d_scene.materialsLUT);*/
 
 	transform KERNEL_DIM(((nFaces + BLK_SIZE - 1) / BLK_SIZE), BLK_SIZE) (dp_vertices, dp_normals, dp_indices, 
 		dp_mtlInterval, dp_vertTrans, dp_normalTrans, dp_wVertices, dp_wNormals, nFaces, nObjs);
-	checkDeviceVector(wVertices);
-	checkDeviceVector(wNormals);
+	/*checkDeviceVector(wVertices);
+	checkDeviceVector(wNormals);*/
 
 	// constructs bvh every frame
 	BVH bvh(nFaces);
 	bvh.construct(wVertices, d_scene.indices);
 	BVHNode* dp_bvhNodes = thrust::raw_pointer_cast(bvh.m_nodes.data());
-	checkDeviceVector(bvh.m_nodes);
+	//checkDeviceVector(bvh.m_nodes);
 
 	thrust::device_vector<int> d_hitRecord(m_width * m_height);
 	int* dp_hitRecord = thrust::raw_pointer_cast(d_hitRecord.data());
@@ -471,10 +464,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 		trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_vertices, dp_normals, dp_indices, dp_mtlInterval,
 			dp_mtls, dp_radiance, dp_rays, dp_states, dp_hitRecord, m_width, m_height, nFaces, nObjs);
 		cudaDeviceSynchronize();
-		checkDeviceVector(radiance);
 		checkDeviceVector(d_hitRecord);
-		int hitCnt = thrust::count(d_hitRecord.begin(), d_hitRecord.end(), -1);
-		std::cout << hitCnt << std::endl;
 	}
 
 	copyToFB KERNEL_DIM(grid_config, blk_config) (dp_radiance, framebuffer, m_height, m_width, nSamplesPerPixel);
@@ -483,7 +473,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 8;
+	int nSamplesPerPixel = 1;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;
