@@ -69,6 +69,7 @@ CUDA_CALLABLE inline bool rayHitTriangle(Ray& ray, const Vec3& v0, const Vec3& v
 {
 	Vec3 e1 = v1 - v0;
 	Vec3 e2 = v2 - v0;
+	// if (dot(cross(e1, e2), ray.m_direction) >= 0) e1 = -e1;
 	Vec3 t = ray.m_origin - v0;
 	Vec3 p = cross(ray.m_direction, e2);
 	Vec3 q = cross(t, e1);

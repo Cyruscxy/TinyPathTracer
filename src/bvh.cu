@@ -24,20 +24,24 @@ CUDA_CALLABLE inline int64_t floatTo21Int(float x)
 {
 	int32_t ix = *(int32_t*)(&x);
 	int32_t exponent = (ix >> 23) & 0x000000ff;
-	exponent -= 127;
 	int32_t mantissa = (ix & 0x00ffffff) | 0x00800000;
-	int32_t sign = ix & 0x00000001;
-	sign = sign * (-2) + 1;
+	exponent -= 127;
+	uint32_t signBit = ix & 0x80000000;
+	signBit >>= 30;
+	int32_t sign = -1 * ((int32_t)signBit - 1);
 	int32_t value;
-	if (exponent >= 8) value = INT32_MAX * sign;
+	if (exponent >= 8) {
+		value = INT32_MAX;
+	}
 	else
 	{
 		if (exponent >= 0) value = mantissa << exponent;
 		else value = mantissa >> (exponent * -1);
 	}
-	uint32_t bits = *(int32_t*)(&value);
-	bits += INT32_MAX;
-	int64_t result = (bits & 0xfffffe00) >> 9;
+	value *= sign;
+	value += INT32_MAX;
+	uint32_t bits = *(uint32_t*)(&value);
+	int64_t result = (bits & 0xfffff800) >> 11;
 	return result;
 }
 
@@ -122,6 +126,7 @@ __device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherE
 
 struct NodeState
 {
+	CUDA_CALLABLE NodeState(): lock(), writeTimes(0) {}
 	DSpinlock lock;
 	int writeTimes;
 };
@@ -272,13 +277,15 @@ void BVH::construct(thrust::device_vector<Vec3>& vertices, thrust::device_vector
 	dim3 blkSize = 256;
 	dim3 gridSize = (nFace + 255) / 256;
 	initNodes KERNEL_DIM(gridSize, blkSize) (verticesPtr, indicesPtr, keysPtr, lNodesPtr, iNodesPtr, statePtr, nFace);
-	
 	CUDA_CHECK(cudaDeviceSynchronize());
+	checkDeviceVector(m_keys);
+	checkDeviceVector(m_nodes);
 	thrust::sort_by_key(m_keys.begin(), m_keys.end(), m_nodes.begin() + nFace - 1);
 	checkDeviceVector(m_keys);
 	checkDeviceVector(m_nodes);
 	computeNodeRange KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, keysPtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
+	checkDeviceVector(m_nodes);
 	computeBBox KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, statePtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
 }

@@ -9,17 +9,22 @@
 #include <cstdint>
 #include <time.h>
 
-// For debug
-constexpr bool DEBUG_MODE = true;
+
+namespace 
+{
+	// For debug
+	constexpr bool RENDER_NORMAL = true;
+
+	constexpr int BLK_DIM = 16;
+	constexpr int BLK_SIZE = BLK_DIM * BLK_DIM;
+	constexpr int DEPTH_TRACE = 8;
+}
+
 #include "debug_utils.h"
+
 /*
  * Kernel Functions Start
  */
-constexpr int BLK_DIM = 16;
-constexpr int BLK_SIZE = BLK_DIM * BLK_DIM;
-constexpr int DEPTH_TRACE = 8;
-
-
 __global__ void setupRandSeed(size_t seed, curandState* state, size_t n)
 {
 	size_t tid = threadIdx.x + threadIdx.y * blockDim.x;
@@ -264,7 +269,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 	int mtlIdxStack[DEPTH_TRACE];
 	Spectrum directLightStack[DEPTH_TRACE];
 
-	if constexpr ( DEBUG_MODE )
+	if constexpr ( RENDER_NORMAL )
 	{
 		Real dist = REAL_MAX;
 		Ray localRay = rays[pixelX + pixelY * width];
@@ -288,7 +293,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 		v2 = normals[i2];
 		Vec3 actualNormal = baryCoords.x * v0 + baryCoords.y * v1 + baryCoords.z * v2;
 		auto c = Spectrum(actualNormal.habs() * 255.0f);
-		color[pixelX + pixelY * width] = c;
+		color[pixelX + pixelY * width] += c;
 	}
 	else
 	{
@@ -376,10 +381,11 @@ void copyToFB(Spectrum* radiance, unsigned char* data, int height, int width, in
 	totalRad = totalRad / nSamplesPerPixel;
 	uchar3 rgb = totalRad.toUChar();
 
-	unsigned char* pixel = &data[offset * 4];
-	pixel[0] = rgb.x;
+	int fbOffset = (height - pixelY - 1) * width + pixelX;
+	unsigned char* pixel = &data[fbOffset * 4];
+	pixel[0] = rgb.z;
 	pixel[1] = rgb.y;
-	pixel[2] = rgb.z;
+	pixel[2] = rgb.x;
 }
 
 /*
@@ -436,22 +442,23 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	dim3 blk_config(BLK_DIM, BLK_DIM);
 	dim3 grid_config((m_width + BLK_DIM - 1) / BLK_DIM, (m_height + BLK_DIM - 1) / BLK_DIM);
 
-	/*checkDeviceVector(d_scene.vertices);
+	checkDeviceVector(d_scene.vertices);
 	checkDeviceVector(d_scene.vertTrans);
 	checkDeviceVector(d_scene.normalTrans);
 	checkDeviceVector(d_scene.indices);
-	checkDeviceVector(d_scene.materialsLUT);*/
+	checkDeviceVector(d_scene.materialsLUT);
 
 	transform KERNEL_DIM(((nFaces + BLK_SIZE - 1) / BLK_SIZE), BLK_SIZE) (dp_vertices, dp_normals, dp_indices, 
 		dp_mtlInterval, dp_vertTrans, dp_normalTrans, dp_wVertices, dp_wNormals, nFaces, nObjs);
-	/*checkDeviceVector(wVertices);
-	checkDeviceVector(wNormals);*/
+	checkDeviceVector(wVertices);
+	checkDeviceVector(wNormals);
+	CUDA_CHECK(cudaDeviceSynchronize());
 
 	// constructs bvh every frame
 	BVH bvh(nFaces);
 	bvh.construct(wVertices, d_scene.indices);
 	BVHNode* dp_bvhNodes = thrust::raw_pointer_cast(bvh.m_nodes.data());
-	//checkDeviceVector(bvh.m_nodes);
+	checkDeviceVector(bvh.m_nodes);
 
 	thrust::device_vector<int> d_hitRecord(m_width * m_height);
 	int* dp_hitRecord = thrust::raw_pointer_cast(d_hitRecord.data());
@@ -460,20 +467,21 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	{
 		sampleRay KERNEL_DIM(grid_config, blk_config) (dp_rays, m_width, m_height, dp_states, vFov, aspRatio, nearPlane, dp_c2w);
 		checkDeviceVector(rays);
+		CUDA_CHECK(cudaDeviceSynchronize());
 
-		trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_vertices, dp_normals, dp_indices, dp_mtlInterval,
+		trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_wVertices, dp_wNormals, dp_indices, dp_mtlInterval,
 			dp_mtls, dp_radiance, dp_rays, dp_states, dp_hitRecord, m_width, m_height, nFaces, nObjs);
-		cudaDeviceSynchronize();
+		CUDA_CHECK(cudaDeviceSynchronize());
 		checkDeviceVector(d_hitRecord);
 	}
-
+	
 	copyToFB KERNEL_DIM(grid_config, blk_config) (dp_radiance, framebuffer, m_height, m_width, nSamplesPerPixel);
 }
 
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 1;
+	int nSamplesPerPixel = 8;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;
@@ -486,9 +494,7 @@ void PathTracer::render(const std::string& meshFile)
 	try
 	{
 		m_displayer.init();
-
 		m_displayer.run(pathTrace);
-
 		m_displayer.cleanup();
 	}
 	catch (const std::exception& e)
