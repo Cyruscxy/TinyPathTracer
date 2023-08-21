@@ -63,16 +63,13 @@ CUDA_CALLABLE inline int64_t getMortonCode(Vec3 point)
 	return code;
 }
 
-__device__ inline int getTheOtherEnd(int64_t const* keys, int32_t idx, int32_t size, int& dir)
+__device__ inline int getTheOtherEnd(int64_t const* keys, int32_t idx, int32_t size, int& dir, int& lmax)
 {
 
-	if (idx == 0) {
-		dir = 1;
-		return size - 1;
-	}
-
 	// get direction of the range
-	int64_t left = keys[idx - 1];
+	int64_t left;
+	if (idx == 0) left = -1;
+	else left = keys[idx - 1];
 	int64_t right = keys[idx + 1];
 	int64_t self = keys[idx];
 	int leftCommon = findUpperContZero(left ^ self);
@@ -81,7 +78,7 @@ __device__ inline int getTheOtherEnd(int64_t const* keys, int32_t idx, int32_t s
 
 	// compute upper bound for the length of the range
 	int minRange = min(leftCommon, rightCommon);
-	int lmax = 2;
+	lmax = 2;
 	int theOtherEnd = idx + dir * lmax;
 	while (theOtherEnd >= 0 && theOtherEnd < size &&
 		(findUpperContZero(self ^ keys[theOtherEnd]) > minRange))
@@ -103,7 +100,7 @@ __device__ inline int getTheOtherEnd(int64_t const* keys, int32_t idx, int32_t s
 	return theOtherEnd;
 }
 
-__device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherEnd, int dir)
+__device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherEnd, int dir, int lmax)
 {
 	int left, right;
 
@@ -111,12 +108,12 @@ __device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherE
 	else { left = idx; right = otherEnd; }
 
 	int delta = findUpperContZero(keys[left] ^ keys[right]);
-	int range = right - left;
 	int split = 0;
 
-	for (int t = range >> 1; t > 0; t >>= 1)
+	for (int t = lmax >> 1; t > 0; t >>= 1)
 	{
 		int pos = idx + dir * (split + t);
+		if ( pos < left || pos > right ) continue;
 		if (findUpperContZero(keys[idx] ^ keys[pos]) > delta) split += t;
 	}
 	split = idx + split * dir;
@@ -164,8 +161,9 @@ __global__ void computeNodeRange(BVHNode* iNodes, BVHNode* lNodes, int64_t* keys
 	if (tidGlobal < nFaces - 1)
 	{
 		int dir = 0;
-		int otherEnd = getTheOtherEnd(keys, tidGlobal, nFaces, dir);
-		int splitPos = findSplitPosition(keys, tidGlobal, otherEnd, dir);
+		int lmax = 0;
+		int otherEnd = getTheOtherEnd(keys, tidGlobal, nFaces, dir, lmax);
+		int splitPos = findSplitPosition(keys, tidGlobal, otherEnd, dir, lmax);
 
 		if ( dir == 1 )
 		{
@@ -278,14 +276,9 @@ void BVH::construct(thrust::device_vector<Vec3>& vertices, thrust::device_vector
 	dim3 gridSize = (nFace + 255) / 256;
 	initNodes KERNEL_DIM(gridSize, blkSize) (verticesPtr, indicesPtr, keysPtr, lNodesPtr, iNodesPtr, statePtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	checkDeviceVector(m_keys);
-	checkDeviceVector(m_nodes);
 	thrust::sort_by_key(m_keys.begin(), m_keys.end(), m_nodes.begin() + nFace - 1);
-	checkDeviceVector(m_keys);
-	checkDeviceVector(m_nodes);
 	computeNodeRange KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, keysPtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	checkDeviceVector(m_nodes);
 	computeBBox KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, statePtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
 }

@@ -1,7 +1,5 @@
 #include "path_tracer.h"
 #include "intellisense_cuda.h"
-#include "ray.h"
-#include "bvh.cuh"
 #include "geometry_queries.h"
 #include <cuda_runtime.h>
 #include <thrust/device_malloc.h>
@@ -18,6 +16,15 @@ namespace
 	constexpr int BLK_DIM = 16;
 	constexpr int BLK_SIZE = BLK_DIM * BLK_DIM;
 	constexpr int DEPTH_TRACE = 8;
+
+	struct HitStatus
+	{
+		CUDA_CALLABLE HitStatus(): hitIdx(-1), hitDist(REAL_MAX), uv() {}
+
+		int hitIdx;
+		Real hitDist;
+		Vec2 uv;
+	};
 }
 
 #include "debug_utils.h"
@@ -45,7 +52,7 @@ __global__ void sampleRay(Ray* rays, int width, int height, curandState* globalS
 	__shared__ Mat4 c2w;
 	c2w = *cameraToWorld;
 
-	curandState* localState = globalState + tidLocal;
+	curandState* localState = globalState + pixelX + pixelY * width;
 	Ray* localRay = &rays[pixelX + pixelY * width];
 
 	Vec2 pixelLocation = DeviceSampler::RectUniform(localState);
@@ -61,23 +68,19 @@ __global__ void sampleRay(Ray* rays, int width, int height, curandState* globalS
 	dir = (c2w * Vec4(dir, 0.0f)).xyz();
 	localRay->m_origin = (c2w * Vec4(0.0f, 0.0f, 0.0f, 1.0f)).xyz();
 	localRay->m_direction = normalize(dir);
-	localRay->m_distBound = Vec2(0.0f, REAL_MAX);
-	localRay->m_distance = 0.0f;
 }
 
 CUDA_CALLABLE inline
-int traverseBVH(Ray& ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int size, Real& dist)
+void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int* stack, int size, HitStatus& status)
 {
-	int callStacks[64];
 	int stackPtr = 1;
-	callStacks[0] = 0;
-
-	int hitIdx = -1;
-
+	stack[0] = 0;
+	
 	while (stackPtr > 0)
 	{
-		int currentIdx = callStacks[stackPtr - 1];
+		int currentIdx = stack[stackPtr - 1];
 		stackPtr--;
+		// printf("%d\n", currentIdx);
 
 		if (currentIdx >= size - 1) // is leaf node
 		{
@@ -86,30 +89,38 @@ int traverseBVH(Ray& ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int
 			auto vid1 = indices[3 * fid + 1];
 			auto vid2 = indices[3 * fid + 2];
 			Real hitDist;
+			Vec2 uv;
 			// Shall we do the ray-triangle test here, or later after all collected ?
-			if (rayHitTriangle(ray, vertices[vid0], vertices[vid1], vertices[vid2], hitDist))
+			if (rayHitTriangle(ray, vertices[vid0], vertices[vid1], vertices[vid2], hitDist, uv))
 			{
-				if (hitDist < dist) { dist = hitDist; hitIdx = fid; }
+				if (hitDist < status.hitDist && hitDist > 0.0f)
+				{
+					status.hitDist = hitDist;
+					status.hitIdx = fid;
+					status.uv = uv;
+				}
 			}
 		}
-		else
+		else // is internal node
 		{
 			int leftChild = nodes[currentIdx].info.intern.leftChild;
 			int rightChild = nodes[currentIdx].info.intern.rightChild;
 			if (rayHitBBox(ray, nodes[leftChild].box))
 			{
-				callStacks[stackPtr] = leftChild;
+				stack[stackPtr] = leftChild;
 				stackPtr++;
 			}
 			if (rayHitBBox(ray, nodes[rightChild].box))
 			{
-				callStacks[stackPtr] = rightChild;
+				stack[stackPtr] = rightChild;
 				stackPtr++;
 			}
 		}
+		/*if (currentIdx == 969)
+		{
+			printf("\n");
+		}*/
 	}
-
-	return hitIdx;
 }
 
 // worry about warp divergence
@@ -251,7 +262,7 @@ void transform(Vec3* vertices, Vec3* normals, uint32_t* indices, MtlInterval* in
 
 __global__
 void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, MtlInterval* mtlLUT, Material* materials, 
-	Spectrum* color, Ray* rays, curandState* globalState, int* hitRecord, int width, int height, int size, int objCnt)
+	Spectrum* color, Ray* rays, curandState* globalState, int* stacks, int* hitRecord, int width, int height, int size, int objCnt)
 {
 	int tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
 	int bid = blockIdx.x + gridDim.x * blockIdx.y;
@@ -261,83 +272,79 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 
 	__shared__ Real scratch[BLK_SIZE * DEPTH_TRACE];
 
+	if (pixelY != 680) return;
+	if (pixelX != 777) return;
 	if (pixelX >= width || pixelY >= height) return;
-
-	auto localState = globalState + tidLocal;
-	auto localHitRecord = hitRecord + pixelX + pixelY * width;
+	int offset = pixelX + pixelY * width;
+	auto localState = globalState + offset;
+	auto localHitRecord = hitRecord + offset;
+	auto localStack = stacks + offset * 64;
 	auto pStack = scratch + tidLocal * DEPTH_TRACE;
 	int mtlIdxStack[DEPTH_TRACE];
 	Spectrum directLightStack[DEPTH_TRACE];
 
 	if constexpr ( RENDER_NORMAL )
 	{
-		Real dist = REAL_MAX;
 		Ray localRay = rays[pixelX + pixelY * width];
-		int hitIdx = traverseBVH(localRay, nodes, vertices, indices, size, dist);
+		HitStatus status;
+		traverseBVH(localRay, nodes, vertices, indices, localStack, size, status);
+		if (status.hitIdx == -1) printf("not hit\n");
 
-		*localHitRecord = hitIdx;
+		*localHitRecord = status.hitIdx;
 
-		if (hitIdx < 0) return;
+		if (status.hitIdx < 0) return;
 
-		uint32_t i0 = indices[hitIdx * 3 + 0];
-		uint32_t i1 = indices[hitIdx * 3 + 1];
-		uint32_t i2 = indices[hitIdx * 3 + 2];
-		Vec3 v0 = vertices[i0];
-		Vec3 v1 = vertices[i1];
-		Vec3 v2 = vertices[i2];
-		Vec3 hitPos = localRay.m_origin + localRay.m_direction * localRay.m_distance;
-		Vec3 baryCoords = getBaryCoords(v0, v1, v2, hitPos);
+		uint32_t i0 = indices[status.hitIdx * 3 + 0];
+		uint32_t i1 = indices[status.hitIdx * 3 + 1];
+		uint32_t i2 = indices[status.hitIdx * 3 + 2];
 
-		v0 = normals[i0];
-		v1 = normals[i1];
-		v2 = normals[i2];
-		Vec3 actualNormal = baryCoords.x * v0 + baryCoords.y * v1 + baryCoords.z * v2;
-		auto c = Spectrum(actualNormal.habs() * 255.0f);
+		Real& u = status.uv.x;
+		Real& v = status.uv.y;
+		Real w = 1.0f - u - v;
+		Vec3 normal = w * normals[i0] + u * normals[i1] + v * normals[i2];
+		auto c = Spectrum(normal.habs() * 255.0f);
 		color[pixelX + pixelY * width] += c;
 	}
 	else
 	{
 		int depth = 0;
-		while (depth < DEPTH_TRACE)
+		for ( ; depth < DEPTH_TRACE; ++depth )
 		{
 			Real dist = REAL_MAX;
 			Ray localRay = rays[pixelX + pixelY * width];
-			int hitIdx = traverseBVH(localRay, nodes, vertices, indices, size, dist);
+			HitStatus status;
+			traverseBVH(localRay, nodes, vertices, indices, localStack, size, status);
 
-			if (depth == 0) *localHitRecord = hitIdx;
+			*localHitRecord = status.hitIdx;
 
-			if (hitIdx < 0) break;
+			if (status.hitIdx < 0) return;
 
-			int mtlIndex = mtlBinarySearch(hitIdx, mtlLUT, objCnt);
+			uint32_t i0 = indices[status.hitIdx * 3 + 0];
+			uint32_t i1 = indices[status.hitIdx * 3 + 1];
+			uint32_t i2 = indices[status.hitIdx * 3 + 2];
 
-			uint32_t i0 = indices[hitIdx * 3 + 0];
-			uint32_t i1 = indices[hitIdx * 3 + 1];
-			uint32_t i2 = indices[hitIdx * 3 + 2];
-			Vec3 v0 = vertices[i0];
-			Vec3 v1 = vertices[i1];
-			Vec3 v2 = vertices[i2];
-			Vec3 hitPos = localRay.m_origin + localRay.m_direction * localRay.m_distance;
-			Vec3 baryCoords = getBaryCoords(v0, v1, v2, hitPos);
+			Real& u = status.uv.x;
+			Real& v = status.uv.y;
+			Real w = 1.0f - u - v;
+			Vec3 normal = w * normals[i0] + u * normals[i1] + v * normals[i2];
+			Vec3 hitPos = w * vertices[i0] + u * vertices[i1] + v * vertices[i2];
 
-			v0 = normals[i0];
-			v1 = normals[i1];
-			v2 = normals[i2];
-			Vec3 actualNormal = baryCoords.x * v0 + baryCoords.y * v1 + baryCoords.z * v2;
+			int mtlIndex = mtlBinarySearch(status.hitIdx, mtlLUT, objCnt);
+			Vec3 newDir;
+			Real prob = getNewDirection(localRay, normal, materials + mtlIndex, localState, newDir);
 
-			Vec3 nextDir;
-			Real probability = getNewDirection(localRay, actualNormal, materials + mtlIndex, localState, nextDir);
-			localRay.m_origin = hitPos;
+			localRay.m_origin = hitPos + MathConst::Delta * newDir;
 
 			// sample direct light
 			{
 				// TODO: Sample delta light
 				Vec3 directDir;
-				Real directProb = getNewDirection(localRay, actualNormal, materials + mtlIndex, localState, directDir);
+				Real directProb = getNewDirection(localRay, normal, materials + mtlIndex, localState, directDir);
 				localRay.m_direction = directDir;
-				hitIdx = traverseBVH(localRay, nodes, vertices, indices, size, dist);
-				if (hitIdx >= 0)
+				traverseBVH(localRay, nodes, vertices, indices, localStack, size, status);
+				if (status.hitIdx >= 0)
 				{
-					int directMtlIdx = mtlBinarySearch(hitIdx, mtlLUT, objCnt);
+					int directMtlIdx = mtlBinarySearch(status.hitIdx, mtlLUT, objCnt);
 					directLightStack[depth] = materials[directMtlIdx].baseColor * materials[directMtlIdx].emissionFactor / directProb;
 				}
 				else
@@ -346,10 +353,9 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 				}
 			}
 
-			pStack[depth] = probability;
+			pStack[depth] = prob;
 			mtlIdxStack[depth] = mtlIndex;
-			localRay.m_direction = nextDir;
-			depth++;
+			localRay.m_direction = newDir;
 		}
 
 		// sample indirect light
@@ -396,7 +402,11 @@ PathTracer::PathTracer() :
 m_displayer(),
 m_width(m_displayer.m_windowExtent.width),
 m_height(m_displayer.m_windowExtent.height),
-m_randStates(m_width * m_height) {}
+m_randStates(m_width * m_height),
+m_radiance(m_width * m_height),
+m_wVertices(0),
+m_wNormals(0),
+m_rays(m_height * m_width) {}
 
 void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* framebuffer, int nSamplesPerPixel)
 {
@@ -421,13 +431,11 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	int nPixels = m_height * m_width;
 	setupRandSeed KERNEL_DIM((nPixels + BLK_SIZE - 1) / BLK_SIZE, BLK_SIZE) (tseed, dp_states, nPixels);
 
-	thrust::device_vector<Spectrum> radiance(nPixels);
-	thrust::device_vector<Vec3> wVertices(nVerts);
-	thrust::device_vector<Vec3> wNormals(nNormals);
-	thrust::device_vector<Ray> rays(m_height * m_width);
-	Ray* dp_rays = thrust::raw_pointer_cast(rays.data());
+	if (m_wVertices.size() != nVerts) m_wVertices.resize(nVerts);
+	if (m_wNormals.size() != nVerts) m_wNormals.resize(nNormals);
+	Ray* dp_rays = thrust::raw_pointer_cast(m_rays.data());
 
-	Spectrum* dp_radiance = thrust::raw_pointer_cast(radiance.data());
+	Spectrum* dp_radiance = thrust::raw_pointer_cast(m_radiance.data());
 	uint32_t* dp_indices = thrust::raw_pointer_cast(d_scene.indices.data());
 	Vec3* dp_vertices = thrust::raw_pointer_cast(d_scene.vertices.data());
 	Vec3* dp_normals = thrust::raw_pointer_cast(d_scene.normals.data());
@@ -436,30 +444,34 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	MtlInterval* dp_mtlInterval = thrust::raw_pointer_cast(d_scene.materialsLUT.data());
 	Mat4* dp_vertTrans = thrust::raw_pointer_cast(d_scene.vertTrans.data());
 	Mat4* dp_normalTrans = thrust::raw_pointer_cast(d_scene.normalTrans.data());
-	Vec3* dp_wVertices = thrust::raw_pointer_cast(wVertices.data());
-	Vec3* dp_wNormals = thrust::raw_pointer_cast(wNormals.data());
+	Vec3* dp_wVertices = thrust::raw_pointer_cast(m_wVertices.data());
+	Vec3* dp_wNormals = thrust::raw_pointer_cast(m_wNormals.data());
 
 	dim3 blk_config(BLK_DIM, BLK_DIM);
 	dim3 grid_config((m_width + BLK_DIM - 1) / BLK_DIM, (m_height + BLK_DIM - 1) / BLK_DIM);
 
-	checkDeviceVector(d_scene.vertices);
+	/*checkDeviceVector(d_scene.vertices);
 	checkDeviceVector(d_scene.vertTrans);
-	checkDeviceVector(d_scene.normalTrans);
 	checkDeviceVector(d_scene.indices);
-	checkDeviceVector(d_scene.materialsLUT);
+	checkDeviceVector(d_scene.normalTrans);
+	checkDeviceVector(d_scene.materialsLUT);*/
+
+	thrust::fill(m_radiance.begin(), m_radiance.end(), Spectrum());
+	thrust::device_vector<int> d_stacks(nPixels * 64);
+	int* dp_stacks = thrust::raw_pointer_cast(d_stacks.data());
 
 	transform KERNEL_DIM(((nFaces + BLK_SIZE - 1) / BLK_SIZE), BLK_SIZE) (dp_vertices, dp_normals, dp_indices, 
 		dp_mtlInterval, dp_vertTrans, dp_normalTrans, dp_wVertices, dp_wNormals, nFaces, nObjs);
-	checkDeviceVector(wVertices);
-	checkDeviceVector(wNormals);
+	/*checkDeviceVector(wVertices);
+	checkDeviceVector(wNormals);*/
+	//checkVertices(d_scene.indices, m_wVertices);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
 	// constructs bvh every frame
 	BVH bvh(nFaces);
-	bvh.construct(wVertices, d_scene.indices);
+	bvh.construct(m_wVertices, d_scene.indices);
 	BVHNode* dp_bvhNodes = thrust::raw_pointer_cast(bvh.m_nodes.data());
-	checkBVHNodes(bvh.m_nodes);
-	checkDeviceVector(bvh.m_nodes);
+	//checkBVHNodes(bvh.m_nodes);
 
 	thrust::device_vector<int> d_hitRecord(m_width * m_height);
 	int* dp_hitRecord = thrust::raw_pointer_cast(d_hitRecord.data());
@@ -467,11 +479,11 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	for ( int idx = 0; idx < nSamplesPerPixel; ++idx )
 	{
 		sampleRay KERNEL_DIM(grid_config, blk_config) (dp_rays, m_width, m_height, dp_states, vFov, aspRatio, nearPlane, dp_c2w);
-		checkDeviceVector(rays);
+		checkDeviceVector(m_rays);
 		CUDA_CHECK(cudaDeviceSynchronize());
 
 		trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_wVertices, dp_wNormals, dp_indices, dp_mtlInterval,
-			dp_mtls, dp_radiance, dp_rays, dp_states, dp_hitRecord, m_width, m_height, nFaces, nObjs);
+			dp_mtls, dp_radiance, dp_rays, dp_states, dp_stacks, dp_hitRecord, m_width, m_height, nFaces, nObjs);
 		CUDA_CHECK(cudaDeviceSynchronize());
 		checkDeviceVector(d_hitRecord);
 	}
@@ -482,7 +494,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 8;
+	int nSamplesPerPixel = 1;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;

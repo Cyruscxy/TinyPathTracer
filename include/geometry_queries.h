@@ -58,14 +58,12 @@ CUDA_CALLABLE inline bool rayHitSphere(Ray& ray, Real raidus, Vec2& times)
 
 	Real tmin = -b - sqrt(delta);
 	Real tmax = -b + sqrt(delta);
-	if (tmin >= ray.m_distBound.x && tmin <= ray.m_distBound.y) times.x = tmin;
-	else if (tmax > ray.m_distBound.y || tmax < ray.m_distBound.x) times.y = tmax;
-	else return false;
 
 	return true;
 }
 
-CUDA_CALLABLE inline bool rayHitTriangle(Ray& ray, const Vec3& v0, const Vec3& v1, const Vec3& v2, Real& dist)
+// the Moller-Trumbore algorithm
+CUDA_CALLABLE inline bool rayHitTriangle(Ray& ray, const Vec3& v0, const Vec3& v1, const Vec3& v2, Real& dist, Vec2& uv)
 {
 	Vec3 e1 = v1 - v0;
 	Vec3 e2 = v2 - v0;
@@ -77,11 +75,14 @@ CUDA_CALLABLE inline bool rayHitTriangle(Ray& ray, const Vec3& v0, const Vec3& v
 	Real denom = dot(p, e1);
 	if (denom == 0.0f) return false;
 
-	Real u = dot(p, t) / denom;
-	Real v = dot(q, ray.m_direction) / denom;
+	Real invDenom = 1.0f / denom;
+	Real u = dot(p, t) * invDenom;
+	Real v = dot(q, ray.m_direction) * invDenom;
 	if (u < 0.0f || v < 0.0f || u + v > 1.0f) return false;
 
-	dist = dot(q, e2);
+	uv.x = u;
+	uv.y = v;
+	dist = dot(q, e2) * invDenom;
 	return true;
 }
 

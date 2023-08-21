@@ -29,7 +29,7 @@ inline void specToImage(thrust::device_vector<Spectrum>& radiance, int width, in
     for (uint32_t j = 0; j < height; ++j) {
         BYTE* pixel = (BYTE*)ptr;
         for (uint32_t i = 0; i < width; ++i) {
-            auto color = h_radiance[i + j * width].toUChar();
+            auto color = (h_radiance[i + j * width] / 32).toUChar();
             pixel[0] = color.z;
             pixel[1] = color.y;
             pixel[2] = color.x;
@@ -51,26 +51,80 @@ inline void specToImage(thrust::device_vector<Spectrum>& radiance, int width, in
 inline void checkBVHNodes(thrust::device_vector<BVHNode>& nodes)
 {
     size_t nFaces = (nodes.size() + 1) / 2;
-    std::vector<BVHNode> interNodes(nFaces - 1);
-    thrust::copy(nodes.begin(), nodes.begin() + nFaces - 1, interNodes.begin());
+    std::vector<BVHNode> interNodes(nodes.size());
+    thrust::copy(nodes.begin(), nodes.end(), interNodes.begin());
     std::vector<int> children(nodes.size(), 0);
-    int i = 0;
-    for ( auto& node : interNodes)
+    std::vector<int> parent(nFaces - 1, 0);
+    for ( int i = 0; i < nFaces - 1; ++i )
     {
-        children[node.info.intern.leftChild] += 1;
-        children[node.info.intern.rightChild] += 1;
-        if (node.info.intern.leftChild == 2) std::cout << i << " left" << std::endl;
-        if (node.info.intern.rightChild == 2) std::cout << i << " right" << std::endl;
-        ++i;
+        children[interNodes[i].info.intern.leftChild] += 1;
+        children[interNodes[i].info.intern.rightChild] += 1;
+    }
+    for ( auto& node : interNodes )
+    {
+        parent[node.parent] += 1;
     }
 
-    /*for ( int i = 0; i < children.size(); ++i )
+    for ( int i = 0; i < children.size(); ++i )
     {
-	    if ( children[i] > 1 )
+	    if ( children[i] != 1 )
 	    {
-            std::cout << i << ": " << children[i] << std::endl;
+            std::cout << i << ": " << children[i] << " children" << std::endl;
 	    }
-    }*/
+    }
+    for (int i = 0; i < parent.size(); ++i)
+    {
+	    if ( parent[i] != 2 )
+	    {
+            std::cout << i << ": " << parent[i] << " parent " << std::endl;
+	    }
+    }
+    
+}
+
+inline void checkVertices(thrust::device_vector<uint32_t>& indices, thrust::device_vector<Vec3>& vertices)
+{
+    std::vector<uint32_t> target{ 467, 466, 469, 407, 342, 344, 346, 347, 345 };
+    std::vector<uint32_t> hi(indices.size());
+    std::vector<Vec3> hv(vertices.size());
+    thrust::copy(indices.begin(), indices.end(), hi.begin());
+    thrust::copy(vertices.begin(), vertices.end(), hv.begin());
+
+    for ( auto fid: target )
+    {
+        std::cout << fid << ": ";
+        for ( int i = 0; i < 3; ++i )
+        {
+            uint32_t id = hi[3 * fid + i];
+            Vec3 v = hv[id];
+            // std::cout << "(" << v.x << ", " << v.y << ", " << v.z << ") ";
+            std::cout << id << " ";
+        }
+        std::cout << std::endl;
+    }
+}
+
+inline void checkBVHVariance(thrust::device_vector<BVHNode>& currentNodes, std::vector<BVHNode>& lastNodes)
+{
+    std::vector<BVHNode> nodes(currentNodes.size());
+    thrust::copy(currentNodes.begin(), currentNodes.end(), nodes.begin());
+
+    if ( !lastNodes.empty() )
+    {
+	    for ( int i = 0; i < lastNodes.size(); ++i )
+	    {
+            bool equal = true;
+            equal &= nodes[i].parent == lastNodes[i].parent;
+            equal &= nodes[i].info.intern.leftChild == lastNodes[i].info.intern.leftChild;
+            equal &= nodes[i].info.intern.rightChild == lastNodes[i].info.intern.rightChild;
+            if ( !equal )
+            {
+                std::cout << "bvh node diff: " << i << std::endl;
+            }
+	    } 
+    }
+
+    lastNodes = std::move(nodes);
 }
 
 #endif
