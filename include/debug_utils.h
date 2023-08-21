@@ -4,6 +4,8 @@
 #define DEBUG_UTILS
 
 #include <thrust/device_vector.h>
+#include <vector>
+#include <utility>
 #include "FreeImage/FreeImage.h"
 #include "material.h"
 
@@ -46,11 +48,29 @@ inline void specToImage(thrust::device_vector<Spectrum>& radiance, int width, in
     FreeImage_Unload(tmp);
 }
 
-void checkBVHNodes(thrust::device_vector<BVHNode>& nodes)
+inline void checkBVHNodes(thrust::device_vector<BVHNode>& nodes)
 {
     size_t nFaces = (nodes.size() + 1) / 2;
-    std::vector<BVHNode> interNodes(nodes.size());
-    thrust::copy()
+    std::vector<BVHNode> interNodes(nFaces - 1);
+    thrust::copy(nodes.begin(), nodes.begin() + nFaces - 1, interNodes.begin());
+    std::vector<int> children(nodes.size(), 0);
+    int i = 0;
+    for ( auto& node : interNodes)
+    {
+        children[node.info.intern.leftChild] += 1;
+        children[node.info.intern.rightChild] += 1;
+        if (node.info.intern.leftChild == 2) std::cout << i << " left" << std::endl;
+        if (node.info.intern.rightChild == 2) std::cout << i << " right" << std::endl;
+        ++i;
+    }
+
+    /*for ( int i = 0; i < children.size(); ++i )
+    {
+	    if ( children[i] > 1 )
+	    {
+            std::cout << i << ": " << children[i] << std::endl;
+	    }
+    }*/
 }
 
 #endif

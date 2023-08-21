@@ -458,6 +458,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	BVH bvh(nFaces);
 	bvh.construct(wVertices, d_scene.indices);
 	BVHNode* dp_bvhNodes = thrust::raw_pointer_cast(bvh.m_nodes.data());
+	checkBVHNodes(bvh.m_nodes);
 	checkDeviceVector(bvh.m_nodes);
 
 	thrust::device_vector<int> d_hitRecord(m_width * m_height);
