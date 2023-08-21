@@ -73,14 +73,14 @@ __global__ void sampleRay(Ray* rays, int width, int height, curandState* globalS
 CUDA_CALLABLE inline
 void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int* stack, int size, HitStatus& status)
 {
+	int call_stack[64];
 	int stackPtr = 1;
-	stack[0] = 0;
+	call_stack[0] = 0;
 	
 	while (stackPtr > 0)
 	{
-		int currentIdx = stack[stackPtr - 1];
+		int currentIdx = call_stack[stackPtr - 1];
 		stackPtr--;
-		// printf("%d\n", currentIdx);
 
 		if (currentIdx >= size - 1) // is leaf node
 		{
@@ -107,19 +107,21 @@ void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int
 			int rightChild = nodes[currentIdx].info.intern.rightChild;
 			if (rayHitBBox(ray, nodes[leftChild].box))
 			{
-				stack[stackPtr] = leftChild;
+				call_stack[stackPtr] = leftChild;
 				stackPtr++;
 			}
 			if (rayHitBBox(ray, nodes[rightChild].box))
 			{
-				stack[stackPtr] = rightChild;
+				call_stack[stackPtr] = rightChild;
 				stackPtr++;
 			}
+			if (currentIdx == 969)
+			{
+				rayHitBBox(ray, nodes[leftChild].box);
+				rayHitBBox(ray, nodes[rightChild].box);
+				printf("\n");
+			}
 		}
-		/*if (currentIdx == 969)
-		{
-			printf("\n");
-		}*/
 	}
 }
 
@@ -479,7 +481,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	for ( int idx = 0; idx < nSamplesPerPixel; ++idx )
 	{
 		sampleRay KERNEL_DIM(grid_config, blk_config) (dp_rays, m_width, m_height, dp_states, vFov, aspRatio, nearPlane, dp_c2w);
-		checkDeviceVector(m_rays);
+		//checkDeviceVector(m_rays);
 		CUDA_CHECK(cudaDeviceSynchronize());
 
 		trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_wVertices, dp_wNormals, dp_indices, dp_mtlInterval,

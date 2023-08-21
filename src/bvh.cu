@@ -123,13 +123,12 @@ __device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherE
 
 struct NodeState
 {
-	CUDA_CALLABLE NodeState(): lock(), writeTimes(0) {}
-	DSpinlock lock;
-	int writeTimes;
+	CUDA_CALLABLE NodeState(): level(-1) {}
+	int level;
 };
 
 __global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHNode* lNodes, 
-	BVHNode* iNodes, NodeState* states, uint32_t size)
+	BVHNode* iNodes, uint32_t size)
 {
 	int32_t tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
 	int32_t bid = blockIdx.x + blockIdx.y * gridDim.x;
@@ -147,7 +146,6 @@ __global__ void initNodes(Vec3* vertices, uint32_t* indices, int64_t* keys, BVHN
 	lNodes[tidGlobal].info.leaf.fid = tidGlobal;
 	if (tidGlobal < size - 1) {
 		iNodes[tidGlobal].box = BBox(Vec3(REAL_MAX), Vec3(-REAL_MAX));
-		states[tidGlobal].writeTimes = 0;
 	}
 }
 
@@ -220,37 +218,78 @@ __global__ void computeNodeRange(BVHNode* iNodes, BVHNode* lNodes, int64_t* keys
 	}
 }
 
-__global__ void computeBBox(BVHNode* iNodes, BVHNode* lNodes, NodeState* states, int32_t size)
+// should be called by only 1 block
+__global__ void computeBBox(BVHNode* nodes, NodeState* states, int32_t size)
 {
-	int tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
-	int bid = blockIdx.x + blockIdx.y * gridDim.x;
-	int tidGlobal = tidLocal + bid * blockDim.x * blockDim.y;
-	if (tidGlobal >= size) return;
+	int tid = threadIdx.x + threadIdx.y * blockDim.x;
+	int blkSize = blockDim.x * blockDim.y;
 
-	int currentIdx = tidGlobal;
+	int interSize = size - 1;
 
-	int parentIdx = lNodes[currentIdx].parent;
-	bool cont = false;
-	// Dead lock?
-	states[parentIdx].lock.acquire();
+	__shared__ int flag;
+	if (tid == 0) flag = 1;
+	__syncthreads();
 
-	iNodes[parentIdx].box.enclose(lNodes[currentIdx].box);
-	states[parentIdx].writeTimes += 1;
-	cont = states[parentIdx].writeTimes == 2;
-
-	states[parentIdx].lock.release();
-
-	while (cont)
+	int currentLevel = 0;
+	int loops = (size + blkSize - 1) / blkSize;
+	for (int i = 0; i < loops; ++i)
 	{
-		currentIdx = parentIdx;
-		parentIdx = iNodes[currentIdx].parent;
-		states[parentIdx].lock.acquire();
+		int currentIdx = tid + i * blkSize;
+		if (currentIdx < interSize)
+		{
+			int left = nodes[currentIdx].info.intern.leftChild;
+			int right = nodes[currentIdx].info.intern.rightChild;
+			if (left > interSize && right > interSize)
+			{
+				states[currentIdx].level = currentLevel;
+			}
+		}
+	}
+	currentLevel += 1;
+	__syncthreads();
 
-		iNodes[parentIdx].box.enclose(iNodes[currentIdx].box);
-		states[parentIdx].writeTimes += 1;
-		cont = states[parentIdx].writeTimes == 2 && currentIdx != 0;
+	while( flag )
+	{
+		int loops = (size + blkSize - 1) / blkSize;
+		for ( int i = 0; i < loops; ++i )
+		{
+			int currentIdx = tid + i * blkSize;
+			if (currentIdx < interSize)
+			{
+				int left = nodes[currentIdx].info.intern.leftChild;
+				int right = nodes[currentIdx].info.intern.rightChild;
+				if ( (left < interSize && states[left].level == currentIdx) ||
+					 (right < interSize && states[right].level == currentIdx))
+				{
+					states[currentIdx].level = currentLevel;
+					if (tid == 0) flag = 0;
+				}
+			}
+		}
+		currentLevel += 1;
+		__syncthreads();
+	}
 
-		states[parentIdx].lock.release();
+	for ( int level = 0; level < currentLevel; ++level )
+	{
+		int loops = (size + blkSize - 1) / blkSize;
+		for (int i = 0; i < loops; ++i)
+		{
+			int currentIdx = tid + i * blkSize;
+			if (currentIdx < interSize)
+			{
+				int left = nodes[currentIdx].info.intern.leftChild;
+				int right = nodes[currentIdx].info.intern.rightChild;
+				if ( states[currentIdx].level == level )
+				{
+					BBox box = nodes[left].box;
+					box.enclose(nodes[right].box);
+					nodes[currentIdx].box = box;
+				}
+			}
+		}
+		currentLevel += 1;
+		__syncthreads();
 	}
 }
 
