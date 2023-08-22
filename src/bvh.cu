@@ -123,7 +123,7 @@ __device__ inline int findSplitPosition(int64_t const* keys, int idx, int otherE
 
 struct NodeState
 {
-	CUDA_CALLABLE NodeState(): level(-1) {}
+	CUDA_CALLABLE NodeState(): level(INT32_MAX) {}
 	int level;
 };
 
@@ -239,18 +239,19 @@ __global__ void computeBBox(BVHNode* nodes, NodeState* states, int32_t size)
 		{
 			int left = nodes[currentIdx].info.intern.leftChild;
 			int right = nodes[currentIdx].info.intern.rightChild;
-			if (left > interSize && right > interSize)
+			if (left >= interSize && right >= interSize)
 			{
 				states[currentIdx].level = currentLevel;
 			}
 		}
 	}
-	currentLevel += 1;
 	__syncthreads();
 
-	while( flag )
+	bool notDone = true;
+	while ( notDone )
 	{
 		int loops = (size + blkSize - 1) / blkSize;
+		bool allDone = true;
 		for ( int i = 0; i < loops; ++i )
 		{
 			int currentIdx = tid + i * blkSize;
@@ -258,19 +259,27 @@ __global__ void computeBBox(BVHNode* nodes, NodeState* states, int32_t size)
 			{
 				int left = nodes[currentIdx].info.intern.leftChild;
 				int right = nodes[currentIdx].info.intern.rightChild;
-				if ( (left < interSize && states[left].level == currentIdx) ||
-					 (right < interSize && states[right].level == currentIdx))
+				bool cond = (left < interSize && states[left].level == currentLevel &&
+							right < interSize && states[right].level <= currentLevel) ||
+							(right < interSize && states[right].level == currentLevel &&
+							left < interSize && states[left].level <= currentLevel);
+				if (cond)
 				{
-					states[currentIdx].level = currentLevel;
-					if (tid == 0) flag = 0;
+					states[currentIdx].level = currentLevel + 1;
+					if (tid == 0) {
+						flag = 0;
+					}
 				}
+
+				if (states[currentIdx].level > currentLevel + 1) allDone &= false;
 			}
 		}
 		currentLevel += 1;
+		notDone = !allDone;
 		__syncthreads();
 	}
 
-	for ( int level = 0; level < currentLevel; ++level )
+	for ( int level = 0; level <= currentLevel; ++level )
 	{
 		int loops = (size + blkSize - 1) / blkSize;
 		for (int i = 0; i < loops; ++i)
@@ -288,7 +297,6 @@ __global__ void computeBBox(BVHNode* nodes, NodeState* states, int32_t size)
 				}
 			}
 		}
-		currentLevel += 1;
 		__syncthreads();
 	}
 }
@@ -313,11 +321,11 @@ void BVH::construct(thrust::device_vector<Vec3>& vertices, thrust::device_vector
 	// constructing BVH
 	dim3 blkSize = 256;
 	dim3 gridSize = (nFace + 255) / 256;
-	initNodes KERNEL_DIM(gridSize, blkSize) (verticesPtr, indicesPtr, keysPtr, lNodesPtr, iNodesPtr, statePtr, nFace);
+	initNodes KERNEL_DIM(gridSize, blkSize) (verticesPtr, indicesPtr, keysPtr, lNodesPtr, iNodesPtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
 	thrust::sort_by_key(m_keys.begin(), m_keys.end(), m_nodes.begin() + nFace - 1);
 	computeNodeRange KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, keysPtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	computeBBox KERNEL_DIM(gridSize, blkSize) (iNodesPtr, lNodesPtr, statePtr, nFace);
+	computeBBox KERNEL_DIM(1, 1024) (iNodesPtr, statePtr, nFace);
 	CUDA_CHECK(cudaDeviceSynchronize());
 }

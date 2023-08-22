@@ -115,12 +115,12 @@ void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int
 				call_stack[stackPtr] = rightChild;
 				stackPtr++;
 			}
-			if (currentIdx == 969)
+			/*if (currentIdx == 969)
 			{
 				rayHitBBox(ray, nodes[leftChild].box);
 				rayHitBBox(ray, nodes[rightChild].box);
 				printf("\n");
-			}
+			}*/
 		}
 	}
 }
@@ -274,8 +274,8 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 
 	__shared__ Real scratch[BLK_SIZE * DEPTH_TRACE];
 
-	if (pixelY != 680) return;
-	if (pixelX != 777) return;
+	/*if (pixelY != 680) return;
+	if (pixelX != 777) return;*/
 	if (pixelX >= width || pixelY >= height) return;
 	int offset = pixelX + pixelY * width;
 	auto localState = globalState + offset;
@@ -290,7 +290,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 		Ray localRay = rays[pixelX + pixelY * width];
 		HitStatus status;
 		traverseBVH(localRay, nodes, vertices, indices, localStack, size, status);
-		if (status.hitIdx == -1) printf("not hit\n");
+		//if (status.hitIdx == -1) printf("not hit\n");
 
 		*localHitRecord = status.hitIdx;
 
@@ -473,7 +473,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	BVH bvh(nFaces);
 	bvh.construct(m_wVertices, d_scene.indices);
 	BVHNode* dp_bvhNodes = thrust::raw_pointer_cast(bvh.m_nodes.data());
-	//checkBVHNodes(bvh.m_nodes);
+	// checkBVHNodes(bvh.m_nodes);
 
 	thrust::device_vector<int> d_hitRecord(m_width * m_height);
 	int* dp_hitRecord = thrust::raw_pointer_cast(d_hitRecord.data());
@@ -496,7 +496,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 1;
+	int nSamplesPerPixel = 32;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;
