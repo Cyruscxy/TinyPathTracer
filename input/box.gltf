@@ -143,7 +143,16 @@
 		{
 			"doubleSided":true,
 			"name":"whitWall",
-			"pbrMetallicRoughness":{}
+			"pbrMetallicRoughness":{
+				"baseColorFactor":[
+					0.800000011920929,
+					0.800000011920929,
+					0.800000011920929,
+					1
+				],
+				"metallicFactor":0,
+				"roughnessFactor":0.5
+			}
 		},
 		{
 			"doubleSided":true,
@@ -225,7 +234,7 @@
 	],
 	"meshes":[
 		{
-			"name":"Plane",
+			"name":"top",
 			"primitives":[
 				{
 					"attributes":{
@@ -239,7 +248,7 @@
 			]
 		},
 		{
-			"name":"Plane.001",
+			"name":"bottom",
 			"primitives":[
 				{
 					"attributes":{
@@ -253,7 +262,7 @@
 			]
 		},
 		{
-			"name":"Plane.002",
+			"name":"right",
 			"primitives":[
 				{
 					"attributes":{
@@ -267,7 +276,7 @@
 			]
 		},
 		{
-			"name":"Plane.003",
+			"name":"left",
 			"primitives":[
 				{
 					"attributes":{
@@ -281,7 +290,7 @@
 			]
 		},
 		{
-			"name":"Plane.004",
+			"name":"back",
 			"primitives":[
 				{
 					"attributes":{
@@ -295,7 +304,7 @@
 			]
 		},
 		{
-			"name":"Sphere",
+			"name":"glossy_ball",
 			"primitives":[
 				{
 					"attributes":{
@@ -309,7 +318,7 @@
 			]
 		},
 		{
-			"name":"Plane.006",
+			"name":"light",
 			"primitives":[
 				{
 					"attributes":{
@@ -323,7 +332,7 @@
 			]
 		},
 		{
-			"name":"Sphere.002",
+			"name":"glass_ball",
 			"primitives":[
 				{
 					"attributes":{

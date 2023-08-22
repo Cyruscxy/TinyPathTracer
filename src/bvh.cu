@@ -244,14 +244,18 @@ __global__ void computeBBox(BVHNode* nodes, NodeState* states, int32_t size)
 				states[currentIdx].level = currentLevel;
 			}
 		}
+
+		if ( currentIdx < size )
+		{
+			int lid = currentIdx + interSize;
+			
+		}
 	}
 	__syncthreads();
-
-	bool notDone = true;
-	while ( notDone )
+	
+	while ( flag )
 	{
 		int loops = (size + blkSize - 1) / blkSize;
-		bool allDone = true;
 		for ( int i = 0; i < loops; ++i )
 		{
 			int currentIdx = tid + i * blkSize;
@@ -260,22 +264,20 @@ __global__ void computeBBox(BVHNode* nodes, NodeState* states, int32_t size)
 				int left = nodes[currentIdx].info.intern.leftChild;
 				int right = nodes[currentIdx].info.intern.rightChild;
 				bool cond = (left < interSize && states[left].level == currentLevel &&
-							right < interSize && states[right].level <= currentLevel) ||
+							((right < interSize && states[right].level <= currentLevel) || right >= interSize)) ||
 							(right < interSize && states[right].level == currentLevel &&
-							left < interSize && states[left].level <= currentLevel);
+							((left < interSize && states[left].level <= currentLevel) || left >= interSize));
 				if (cond)
 				{
 					states[currentIdx].level = currentLevel + 1;
-					if (tid == 0) {
+					if ( currentIdx == 0 )
+					{
 						flag = 0;
 					}
 				}
-
-				if (states[currentIdx].level > currentLevel + 1) allDone &= false;
 			}
 		}
 		currentLevel += 1;
-		notDone = !allDone;
 		__syncthreads();
 	}
 

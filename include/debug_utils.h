@@ -127,4 +127,45 @@ inline void checkBVHVariance(thrust::device_vector<BVHNode>& currentNodes, std::
     lastNodes = std::move(nodes);
 }
 
+inline void checkHitStatus(thrust::device_vector<int>& hitRecord, int width, int height)
+{
+    std::vector<int> hits(width * height);
+    thrust::copy(hitRecord.begin(), hitRecord.end(), hits.begin());
+
+    FIBITMAP* tmp = FreeImage_Allocate(width, height, 24);
+    if (!tmp) std::cerr << "Failed to allocate memory for result!" << std::endl;
+    uint32_t pitch = FreeImage_GetPitch(tmp);
+
+    BYTE* ptr = FreeImage_GetBits(tmp);
+    for (uint32_t j = 0; j < height; ++j) {
+        BYTE* pixel = (BYTE*)ptr;
+        for (uint32_t i = 0; i < width; ++i) {
+            unsigned char color;
+            if ( hits[i + j * width] > -1 )
+            {
+                color = 125;
+            }
+            else
+            {
+                color = 0;
+            }
+             
+            pixel[0] = color;
+            pixel[1] = color;
+            pixel[2] = color;
+            pixel += 3;
+        }
+        ptr += pitch;
+    }
+
+    std::string path;
+#ifdef PATH_TO_MESH_DIR
+    path += PATH_TO_MESH_DIR;
+#endif
+
+    if (!FreeImage_Save(FIF_PNG, tmp, (path + "hit.png").c_str()))
+        std::cout << "Failed to save image!" << std::endl;
+    FreeImage_Unload(tmp);
+}
+
 #endif

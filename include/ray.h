@@ -8,7 +8,7 @@
 struct Ray
 {
 	CUDA_CALLABLE inline Ray(): m_origin(0.0f), m_direction(0.0f) {}
-	CUDA_CALLABLE inline Ray(const Vec3& o, const Vec3& d, float t) :
+	CUDA_CALLABLE inline Ray(const Vec3& o, const Vec3& d) :
 	m_origin(o), m_direction(d) {}
 
 	Vec3 m_origin;

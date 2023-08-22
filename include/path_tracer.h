@@ -26,7 +26,6 @@ private:
 	thrust::device_vector<Spectrum> m_radiance;
 	thrust::device_vector<Vec3> m_wVertices;
 	thrust::device_vector<Vec3> m_wNormals;
-	thrust::device_vector<Ray> m_rays;
 	std::vector<BVHNode> m_lastNodes;
 
 	void doTrace(DeviceScene& scene, Camera& camera, unsigned char* framebuffer, int nSamplesPerPixel);
