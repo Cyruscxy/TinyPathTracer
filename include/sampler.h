@@ -55,7 +55,7 @@ namespace DeviceSampler
 		Real phi = 2.0f * MathConst::PI * Xi2;
 		Real x = sinf(theta) * cosf(phi);
 		Real y = cosf(theta);
-		Real z = sinf(theta) * cosf(phi);
+		Real z = sinf(theta) * sinf(phi);
 
 		return x * xBase + y * normal + z * zBase;
 	}

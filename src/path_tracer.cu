@@ -33,8 +33,10 @@ namespace
  */
 __global__ void setupRandSeed(size_t seed, curandState* state, size_t n)
 {
-	size_t tid = threadIdx.x + threadIdx.y * blockDim.x;
-	if ( tid < n ) curand_init(seed, tid, 0, &state[tid]);
+	size_t tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
+	size_t bid = blockIdx.x + gridDim.x * blockIdx.y;
+	size_t tidGlobal = tidLocal + bid * BLK_SIZE;
+	if ( tidGlobal < n ) curand_init(seed, tidGlobal, 0, &state[tidGlobal]);
 }
 
 __device__ __inline__
@@ -297,7 +299,6 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 		int depth = 0;
 		for ( ; depth < DEPTH_TRACE; ++depth )
 		{
-			Real dist = REAL_MAX;
 			HitStatus status;
 			traverseBVH(ray, nodes, vertices, indices, size, status);
 
@@ -313,6 +314,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 			Real& v = status.uv.y;
 			Real w = 1.0f - u - v;
 			Vec3 normal = w * normals[i0] + u * normals[i1] + v * normals[i2];
+			//Vec3 hitPos = w * vertices[i0] + u * vertices[i1] + v * vertices[i2];
 			Vec3 hitPos = ray.m_origin + status.hitDist * ray.m_direction;
 
 			int mtlIndex = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
@@ -444,8 +446,8 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 
 	transform KERNEL_DIM(((nFaces + BLK_SIZE - 1) / BLK_SIZE), BLK_SIZE) (dp_vertices, dp_normals, dp_indices, 
 		dp_mtlInterval, dp_vertTrans, dp_normalTrans, dp_wVertices, dp_wNormals, nFaces, nObjs);
-	/*checkDeviceVector(wVertices);
-	checkDeviceVector(wNormals);*/
+	checkDeviceVector(m_wVertices);
+	checkDeviceVector(m_wNormals);
 	//checkVertices(d_scene.indices, m_wVertices);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
