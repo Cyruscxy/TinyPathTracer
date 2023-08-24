@@ -71,9 +71,9 @@ struct Spectrum
 	CUDA_CALLABLE inline uchar3 toUChar()
 	{
 		uchar3 rgb;
-		rgb.x = (unsigned char)(clamp(r, 255.0f, 0.0f));
-		rgb.y = (unsigned char)(clamp(g, 255.0f, 0.0f));
-		rgb.z = (unsigned char)(clamp(b, 255.0f, 0.0f));
+		rgb.x = (unsigned char)(clamp(r * 255.0f, 255.0f, 0.0f));
+		rgb.y = (unsigned char)(clamp(g * 255.0f, 255.0f, 0.0f));
+		rgb.z = (unsigned char)(clamp(b * 255.0f, 255.0f, 0.0f));
 		return rgb;
 	}
 

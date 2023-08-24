@@ -63,7 +63,7 @@ namespace DeviceSampler
 	__device__ __inline__ Real HemishpereUniformPDF(const Vec3& dir, const Vec3& normal)
 	{
 		Real cosTheta = dot(dir, normal);
-		Real f = (cosTheta < 0.0f);
+		Real f = (cosTheta > 0.0f);
 		return (1.0f / (2.0f * MathConst::PI)) * f;
 	}
 
@@ -86,7 +86,7 @@ namespace DeviceSampler
 	__device__ __inline__ Real HemishpereCosinePDF(const Vec3& dir, const Vec3& normal)
 	{
 		Real cosTheta = dot(dir, normal);
-		Real f = cosTheta < 0.0f;
+		Real f = cosTheta > 0.0f;
 		return (cosTheta / MathConst::PI) * f;
 	}
 }
