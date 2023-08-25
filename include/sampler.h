@@ -9,10 +9,15 @@
 
 namespace DeviceSampler
 {
+	__device__ __inline__ Real Unitform(curandState* state)
+	{
+		return curand_uniform(state);
+	}
+
 	__device__ __inline__ Vec2 RectUniform(curandState* state, const Vec2& size = Vec2(1.0f, 1.0f))
 	{
-		Real u = curand_uniform(state);
-		Real v = curand_uniform(state);
+		Real u = Unitform(state);
+		Real v = Unitform(state);
 		return Vec2(u, v) * size;
 	}
 
@@ -24,8 +29,8 @@ namespace DeviceSampler
 
 	__device__ __inline__ Vec3 TriangleUniform(curandState* state, const Vec3& v0, const Vec3& v1, const Vec3& v2)
 	{
-		Real u = sqrtf(curand_uniform(state));
-		Real v = curand_uniform(state);
+		Real u = sqrtf(Unitform(state));
+		Real v = Unitform(state);
 		Real a = u * (1.0f - v);
 		Real b = u * v;
 		return a * v0 + b * v1 + (1.0f - a - b) * v2;
@@ -48,8 +53,8 @@ namespace DeviceSampler
 		xBase /= xBase.norm();
 		Vec3 zBase = cross(xBase, normal);
 
-		Real Xi1 = curand_uniform(state);
-		Real Xi2 = curand_uniform(state);
+		Real Xi1 = Unitform(state);
+		Real Xi2 = Unitform(state);
 
 		Real theta = acosf(Xi1);
 		Real phi = 2.0f * MathConst::PI * Xi2;
@@ -73,8 +78,8 @@ namespace DeviceSampler
 		xBase /= xBase.norm();
 		Vec3 zBase = cross(xBase, normal);
 
-		Real phi = 2.0f * MathConst::PI * curand_uniform(state);
-		Real cosTheta = sqrtf(curand_uniform(state));
+		Real phi = 2.0f * MathConst::PI * Unitform(state);
+		Real cosTheta = sqrtf(Unitform(state));
 		Real sinTheta = sqrtf(1.0f - cosTheta * cosTheta);
 
 		Real x = cosf(phi) * sinTheta;
@@ -88,6 +93,11 @@ namespace DeviceSampler
 		Real cosTheta = dot(dir, normal);
 		Real f = cosTheta > 0.0f;
 		return (cosTheta / MathConst::PI) * f;
+	}
+
+	__device__ __inline__ bool CoinFlip(curandState* state, Real p)
+	{
+		return Unitform(state) < p;
 	}
 }
 
