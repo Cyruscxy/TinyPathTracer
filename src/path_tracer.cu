@@ -142,9 +142,9 @@ Vec3 reflect(Vec3 dir, Vec3 normal)
 }
 
 CUDA_CALLABLE inline
-Vec3 refract(Vec3 dir, Vec3 normal, Real ior, Real& eta, bool& tir)
+Vec3 refract(Vec3 dir, Vec3 normal, Real ior, Real& cosThetaI, Real& eta, bool& tir)
 {
-	Real cosThetaI = dot(dir, normal);
+	cosThetaI = dot(dir, normal);
 	// eta_i / eta_t
 	eta = cosThetaI > 0.0f ? ior : 1.0f / ior;
 	normal = cosThetaI > 0.0f ? -normal : normal;
@@ -154,21 +154,35 @@ Vec3 refract(Vec3 dir, Vec3 normal, Real ior, Real& eta, bool& tir)
 	Real sin2ThetaT = eta * eta * sin2ThetaI;
 
 	// Check if TIR? 
-	if (sin2ThetaT > 1.0f) {
+	if (sin2ThetaT >= 1.0f) {
 		tir = true;
 		return {};
 	}
 
 	Real cosThetaT = sqrt(1.0f - sin2ThetaT);
-	return eta * dir + (cosThetaI * eta - cosThetaT) * normal;
+	return normalize(eta * dir + (cosThetaI * eta - cosThetaT) * normal);
 }
 
 CUDA_CALLABLE inline
-Real shlickFresnel(Real u)
+Real shlickFresnel(Real cosThetaI, Real eta)
 {
-	Real m = clamp(1.0f - u, 1.0f, 0.0f);
+	Real f0 = (1.0f - eta) / (1.0f + eta);
+	f0 *= f0;
+	Real m = clamp(1.0f - cosThetaI, 1.0f, 0.0f);
 	Real m2 = m * m;
-	return m2 * m2 * m;
+	return f0 + (1.0f - f0) * m2 * m2 * m;
+}
+
+CUDA_CALLABLE inline
+Real Fresnel(Real cosThetaI, Real eta)
+{
+	Real sin2ThetaT = eta * eta * (1.0f - cosThetaI * cosThetaI);
+	if (sin2ThetaT >= 1.0f) return 1.0f;
+	Real cosThetaT = sqrt(1.0f - sin2ThetaT);
+
+	Real r1 = (cosThetaI - eta * cosThetaT) / (cosThetaI + eta * cosThetaT);
+	Real r2 = (eta * cosThetaI - cosThetaT) / (eta * cosThetaI + cosThetaT);
+	return 0.5f * (r1 * r1 + r2 * r2);
 }
 
 __device__ __inline__
@@ -178,23 +192,23 @@ Real getNewDirection(Ray& ray, Vec3 normal, Material* mtl, curandState* state, V
 	Real probability;
 	if (mtl->eta > 0.0f) {
 		bool tir = false;
-		Real eta;
-		Vec3 refractDir = refract(ray.m_direction, normal, 1.5, eta, tir);
+		Real eta, cosThetaI;
+		Vec3 refractDir = refract(ray.m_direction, normal, mtl->eta, cosThetaI, eta, tir);
 		Vec3 reflectDir = reflect(ray.m_direction, normal);
-		Real fr = tir ? 1.0f : shlickFresnel(eta);
+		Real fr = tir ? 1.0f : shlickFresnel(cosThetaI, eta);
 
 		if ( DeviceSampler::CoinFlip(state, fr) )
 		{
 			nextDir = reflectDir;
+			//probability = fr;
 		}
 		else
 		{
 			nextDir = refractDir;
-			//nextDir = {};
+			//probability = 1.0f - fr;
 		}
-
-		attenFactor = 1.0f;
 		probability = 1.0f;
+		attenFactor = 1.0f;
 	}
 	else if ( mtl->metallic > 0.0f )
 	{
@@ -206,9 +220,9 @@ Real getNewDirection(Ray& ray, Vec3 normal, Material* mtl, curandState* state, V
 	{
 		Real sign = dot(ray.m_direction, normal) > 0.0f ? -1.0f : 1.0f;
 		normal *= sign;
-		nextDir = DeviceSampler::HemishpereUniform(state, normal);
+		nextDir = DeviceSampler::HemisphereCosine(state, normal);
 		attenFactor = abs(dot(nextDir, normal)) / MathConst::PI;
-		probability = DeviceSampler::HemishpereUniformPDF(nextDir, normal);
+		probability = DeviceSampler::HemishpereCosinePDF(nextDir, normal);
 	}
 	return probability;
 }
@@ -290,7 +304,6 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 		HitStatus status;
 		traverseBVH(ray, nodes, vertices, indices, size, status);
 
-
 		if (status.hitIdx < 0) return;
 
 		uint32_t i0 = indices[status.hitIdx * 3 + 0];
@@ -332,7 +345,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 				Real& u = status.uv.x;
 				Real& v = status.uv.y;
 				Real w = 1.0f - u - v;
-				Vec3 normal = w * normals[i0] + u * normals[i1] + v * normals[i2];
+				Vec3 normal = normalize(w * normals[i0] + u * normals[i1] + v * normals[i2]);
 				Vec3 hitPos = ray.m_origin + status.hitDist * ray.m_direction;
 
 				int mtlIndex = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
@@ -344,10 +357,11 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 				Real attenFactor;
 				Real prob = getNewDirection(ray, normal, materials + mtlIndex, localState, newDir, attenFactor);
 				attenuation[depth] = materials[mtlIndex].baseColor * attenFactor;
+				pStack[depth] = prob;
 
 				ray.m_origin = hitPos + MathConst::Delta * newDir;
 				// sample direct light
-				{
+				if (!(materials[mtlIndex].eta >= 1.0f || materials[mtlIndex].metallic > 0.0f)) {
 					// TODO: Sample delta light
 					Vec3 directDir;
 					status.hitIdx = -1;
@@ -364,8 +378,11 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 						directLightStack[depth] = Spectrum(0.0f, 0.0f, 0.0f);
 					}
 				}
+				else
+				{
+					directLightStack[depth] = Spectrum(0.0f, 0.0f, 0.0f);
+				}
 
-				pStack[depth] = prob;
 				mtlIdxStack[depth] = mtlIndex;
 				if (materials[mtlIndex].emissionFactor > 0.0f)
 				{
@@ -511,7 +528,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 32;
+	int nSamplesPerPixel = 512;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;
