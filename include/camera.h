@@ -17,6 +17,14 @@ public:
 	{
 		if (!m_transform) m_transform = std::make_shared<Transform>(Vec3(0.0f), Vec3(0.0f), Vec3(1.0f));
 	}
+	Camera(Real fov, Real asp, Real nearZ, const Transform& trans) : m_verticalFOV(fov), m_aspectRatio(asp), m_nearPlane(nearZ)
+	{
+		m_transform = std::make_shared<Transform>(trans);
+	}
+	Camera(Real fov, Real asp, Real nearZ, Transform&& trans) : m_verticalFOV(fov), m_aspectRatio(asp), m_nearPlane(nearZ)
+	{
+		m_transform = std::make_shared<Transform>(std::forward<Transform>(trans));
+	}
 	Camera(Vec3 loc, Vec3 angle, Vec3 s) : Camera()
 	{
 		m_transform = std::make_shared<Transform>(loc, angle, s);

@@ -4,48 +4,51 @@
 #define MATERIAL_H
 
 #include "math/vec.h"
+#include "assert.h"
+#include <vector>
 
 struct Spectrum
 {
-	CUDA_CALLABLE inline Spectrum(): r(0.0f), g(0.0f), b(0.0f) {}
-	CUDA_CALLABLE inline Spectrum(Real _r, Real _g, Real _b): r(_r), g(_g), b(_b) {}
-	CUDA_CALLABLE inline Spectrum(Real f): r(f), g(f), b(f) {}
-	CUDA_CALLABLE inline Spectrum(Vec3 c): r(c.x), g(c.y), b(c.z) {}
+	CUDA_CALLABLE Spectrum(): r(0.0f), g(0.0f), b(0.0f) {}
+	CUDA_CALLABLE Spectrum(Real _r, Real _g, Real _b): r(_r), g(_g), b(_b) {}
+	CUDA_CALLABLE Spectrum(Real f): r(f), g(f), b(f) {}
+	CUDA_CALLABLE Spectrum(Vec3 c): r(c.x), g(c.y), b(c.z) {}
+	CUDA_CALLABLE Spectrum(std::vector<float> c)
+	{
+		assert(c.size() == 3);
+		r = c[0]; g = c[1]; b = c[2];
+	}
+	CUDA_CALLABLE Spectrum(std::vector<double> c)
+	{
+		assert(c.size() == 3);
+		r = static_cast<Real>(c[0]);
+		g = static_cast<Real>(c[1]);
+		b = static_cast<Real>(c[2]);
+	}
 
 	CUDA_CALLABLE inline Spectrum operator+=(Spectrum c)
 	{
-		r += c.r;
-		g += c.g;
-		b += c.b;
+		r += c.r; g += c.g; b += c.b;
 		return *this;
 	}
 	CUDA_CALLABLE inline Spectrum operator-=(Spectrum c)
 	{
-		r -= c.r;
-		g -= c.g;
-		b -= c.b;
+		r -= c.r; g -= c.g; b -= c.b;
 		return *this;
 	}
 	CUDA_CALLABLE inline Spectrum operator*=(Spectrum c)
 	{
-		r *= c.r;
-		g *= c.g;
-		b *= c.b;
+		r *= c.r; g *= c.g; b *= c.b;
 		return *this;
 	}
 	CUDA_CALLABLE inline Spectrum operator/=(Real s)
 	{
-		Real invS = 1.0f / s;
-		r /= invS;
-		g /= invS;
-		b /= invS;
+		Real invS = 1.0f / s; r /= invS; g /= invS; b /= invS;
 		return *this;
 	}
 	CUDA_CALLABLE inline Spectrum operator*=(Real s)
 	{
-		r *= s;
-		g *= s;
-		b *= s;
+		r *= s; g *= s; b *= s;
 		return *this;
 	}
 	CUDA_CALLABLE inline Spectrum operator+(Spectrum c)

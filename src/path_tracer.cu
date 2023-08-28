@@ -160,7 +160,7 @@ Vec3 refract(Vec3 dir, Vec3 normal, Real ior, Real& cosThetaI, Real& eta, bool& 
 	}
 
 	Real cosThetaT = sqrt(1.0f - sin2ThetaT);
-	return normalize(eta * dir + (cosThetaI * eta - cosThetaT) * normal);
+	return eta * dir + (cosThetaI * eta - cosThetaT) * normal;
 }
 
 CUDA_CALLABLE inline
@@ -200,12 +200,10 @@ Real getNewDirection(Ray& ray, Vec3 normal, Material* mtl, curandState* state, V
 		if ( DeviceSampler::CoinFlip(state, fr) )
 		{
 			nextDir = reflectDir;
-			//probability = fr;
 		}
 		else
 		{
 			nextDir = refractDir;
-			//probability = 1.0f - fr;
 		}
 		probability = 1.0f;
 		attenFactor = 1.0f;
@@ -225,12 +223,6 @@ Real getNewDirection(Ray& ray, Vec3 normal, Material* mtl, curandState* state, V
 		probability = DeviceSampler::HemishpereCosinePDF(nextDir, normal);
 	}
 	return probability;
-}
-
-__device__ __inline__
-Spectrum sampleDeltaLight()
-{
-	return Spectrum();
 }
 
 __device__ __inline__
@@ -271,10 +263,33 @@ void transform(Vec3* vertices, Vec3* normals, uint32_t* indices, MtlInterval* in
 	}
 }
 
+__device__ __inline__
+Spectrum sampleDeltaLights(DeltaLight* lights, int nLights, const Vec3& pos, Material* mtl, BVHNode* nodes, 
+	Vec3* vertices, uint32_t* indices, int nFaces, HitStatus& status)
+{
+	Spectrum radiance;
+	int currentIdx = status.hitIdx;
+	for ( int i = 0; i < nLights; ++i )
+	{
+		status.hitIdx = -1;
+		Incoming incoming = lights[i].sample(pos);
+		//Incoming incoming;
+
+		Ray shadowRay(pos, incoming.direction);
+		traverseBVH(shadowRay, nodes, vertices, indices, nFaces, status);
+		if ( status.hitIdx == -1 )
+		{
+			radiance += mtl->baseColor * incoming.radiance;
+		}
+	}
+
+	return radiance;
+}
+
 __global__
-void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, MtlInterval* mtlLUT, Material* materials, 
-	Spectrum* color, curandState* globalState, int width, int height, int size, int objCnt,
-	Real vFov, Real aspectRatio, Mat4* cameraToWorld, int nSamplesPerPixel)
+void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, DeltaLight* lights, MtlInterval* mtlLUT, 
+	Material* materials, Spectrum* color, curandState* globalState, int width, int height, int size, int objCnt, 
+	int nLIghts, Real vFov, Real aspectRatio, Mat4* cameraToWorld, int nSamplesPerPixel)
 {
 	int tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
 	int bid = blockIdx.x + gridDim.x * blockIdx.y;
@@ -285,6 +300,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 	__shared__ Ray rayBuffer[BLK_SIZE];
 	__shared__ Mat4 c2w;
 	if (tidLocal == 0) c2w = *cameraToWorld;
+	__syncthreads();
 	
 	if (pixelX >= width || pixelY >= height) return;
 	int offset = pixelX + pixelY * width;
@@ -294,7 +310,6 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 	Spectrum attenuation[DEPTH_TRACE];
 
 	auto localState = globalState + offset;
-	__syncthreads();
 
 	if constexpr ( RENDER_NORMAL )
 	{
@@ -324,19 +339,14 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 		{
 			rayBuffer[tidLocal] = sampleRays(localState, vFov, aspectRatio, c2w, pixelX, pixelY, width, height);
 			auto& ray = rayBuffer[tidLocal];
-
-			//if (pixelX != 780 || pixelY != 75) return;
+			
 			int depth = 0;
 			for (; depth < DEPTH_TRACE; ++depth)
 			{
-				
 				HitStatus status;
 				traverseBVH(ray, nodes, vertices, indices, size, status);
 				
-				if (status.hitIdx < 0)
-				{
-					break;
-				}
+				if (status.hitIdx < 0) break; 
 
 				uint32_t i0 = indices[status.hitIdx * 3 + 0];
 				uint32_t i1 = indices[status.hitIdx * 3 + 1];
@@ -349,38 +359,37 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Mtl
 				Vec3 hitPos = ray.m_origin + status.hitDist * ray.m_direction;
 
 				int mtlIndex = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
-
-				/*printf("hit index: %d, obj: %d, hit pos: (%f, %f, %f)\n", status.hitIdx, 
-					mtlIndex, hitPos.x, hitPos.y, hitPos.z);*/
-
+				
 				Vec3 newDir;
 				Real attenFactor;
 				Real prob = getNewDirection(ray, normal, materials + mtlIndex, localState, newDir, attenFactor);
 				attenuation[depth] = materials[mtlIndex].baseColor * attenFactor;
 				pStack[depth] = prob;
-
 				ray.m_origin = hitPos + MathConst::Delta * newDir;
+
 				// sample direct light
+				Vec3 directDir;
+				Spectrum directRadiance = sampleDeltaLights(lights, nLIghts, ray.m_origin, materials + mtlIndex, 
+					nodes, vertices, indices,  size, status);
+				status.hitIdx = -1;
 				if (!(materials[mtlIndex].eta >= 1.0f || materials[mtlIndex].metallic > 0.0f)) {
-					// TODO: Sample delta light
-					Vec3 directDir;
-					status.hitIdx = -1;
 					Real directProb = getNewDirection(ray, normal, materials + mtlIndex, localState, directDir, attenFactor);
 					ray.m_direction = directDir;
 					traverseBVH(ray, nodes, vertices, indices, size, status);
 					if (status.hitIdx >= 0)
 					{
 						int directMtlIdx = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
-						directLightStack[depth] = Spectrum(1.0f) * materials[directMtlIdx].emissionFactor;
+						directLightStack[depth] = Spectrum(1.0f) * 
+							(Spectrum(materials[directMtlIdx].emissionFactor) + directRadiance);
 					}
 					else
 					{
-						directLightStack[depth] = Spectrum(0.0f, 0.0f, 0.0f);
+						directLightStack[depth] = directRadiance * materials[mtlIndex].baseColor;
 					}
 				}
 				else
 				{
-					directLightStack[depth] = Spectrum(0.0f, 0.0f, 0.0f);
+					directLightStack[depth] = directRadiance * materials[mtlIndex].baseColor;
 				}
 
 				mtlIdxStack[depth] = mtlIndex;
@@ -458,6 +467,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	size_t nVerts = d_scene.vertices.size();
 	size_t nFaces = d_scene.indices.size() / 3;
 	int nObjs = d_scene.materialsLUT.size();
+	int nLights = d_scene.lights.size();
 
 	Real vFov = camera.getVFov();
 	Real aspRatio = camera.getAspRatio();
@@ -482,6 +492,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	Vec2* dp_texCoords = thrust::raw_pointer_cast(d_scene.texCoords.data());
 	Material* dp_mtls = thrust::raw_pointer_cast(d_scene.materials.data());
 	MtlInterval* dp_mtlInterval = thrust::raw_pointer_cast(d_scene.materialsLUT.data());
+	DeltaLight* dp_lights = thrust::raw_pointer_cast(d_scene.lights.data());
 	Mat4* dp_vertTrans = thrust::raw_pointer_cast(d_scene.vertTrans.data());
 	Mat4* dp_normalTrans = thrust::raw_pointer_cast(d_scene.normalTrans.data());
 	Vec3* dp_wVertices = thrust::raw_pointer_cast(m_wVertices.data());
@@ -515,8 +526,8 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	//int* dp_hitRecord = thrust::raw_pointer_cast(d_hitRecord.data());
 
 	
-	trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_wVertices, dp_wNormals, dp_indices, dp_mtlInterval,
-		dp_mtls, dp_radiance, dp_states, m_width, m_height, nFaces, nObjs, vFov, aspRatio, 
+	trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_wVertices, dp_wNormals, dp_indices, dp_lights,
+		dp_mtlInterval, dp_mtls, dp_radiance, dp_states, m_width, m_height, nFaces, nObjs, nLights, vFov, aspRatio, 
 		dp_c2w, nSamplesPerPixel);
 	CUDA_CHECK(cudaDeviceSynchronize());
 	/*checkDeviceVector(d_hitRecord);
@@ -528,7 +539,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 512;
+	int nSamplesPerPixel = 64;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;

@@ -71,11 +71,15 @@ constexpr Real Delta = 1e-5f;
 }
 
 template<typename T>
-CUDA_CALLABLE inline T max(T x, T y) { return x > y ? x : y; }
+CUDA_CALLABLE T max(T x, T y) { return x > y ? x : y; }
 template<typename T>
-CUDA_CALLABLE inline T min(T x, T y) { return x < y ? x : y; }
+CUDA_CALLABLE T min(T x, T y) { return x < y ? x : y; }
 template<typename T>
-CUDA_CALLABLE inline T clamp(T x, T upperBound, T lowerBound) { return max(min(x, upperBound), lowerBound); }
+CUDA_CALLABLE T clamp(T x, T upperBound, T lowerBound) { return max(min(x, upperBound), lowerBound); }
+template<typename T>
+CUDA_CALLABLE T square(T x) { return x * x; }
+template<typename T>
+CUDA_CALLABLE T saturate(T x) { return clamp(x, 1.0f, 0.0f); }
 
 struct Vec2
 {

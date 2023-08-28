@@ -99,6 +99,14 @@ namespace DeviceSampler
 	{
 		return Unitform(state) < p;
 	}
+
+	// range [lower, upper)
+	__device__ __inline__ int32_t integer(curandState* state, int32_t lower, int32_t upper)
+	{
+		Real n = Unitform(state);
+		n = n * (upper - lower) + lower;
+		return (int32_t)(floor(n));
+	}
 }
 
 #endif

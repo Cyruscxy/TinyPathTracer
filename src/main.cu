@@ -9,6 +9,6 @@ int main(int argc, char *argv[]) {
 	path += PATH_TO_MESH_DIR;
 #endif
 	PathTracer pt;
-	pt.render(path + "box.gltf");
+	pt.render(path + "light.gltf");
 	return 0;
 }

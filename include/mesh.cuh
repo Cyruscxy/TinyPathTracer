@@ -11,6 +11,7 @@
 #include "math/vec.h"
 #include "material.h"
 #include "camera.h"
+#include "delta_light.h"
 
 struct Mesh
 {
@@ -78,9 +79,9 @@ struct MtlInterval
 
 struct DeviceScene
 {
-	DeviceScene(size_t verticesCnt, size_t indicesCnt, size_t nObjs, size_t nMtls) : indices(indicesCnt),
-		vertices(verticesCnt), normals(verticesCnt), texCoords(verticesCnt), materials(nMtls),
-		materialsLUT(nObjs), vertTrans(nObjs), normalTrans(nObjs) {}
+	DeviceScene(size_t verticesCnt, size_t indicesCnt, size_t nObjs, size_t nMtls, size_t nLights) :
+	indices(indicesCnt), vertices(verticesCnt), normals(verticesCnt), texCoords(verticesCnt), materials(nMtls),
+	materialsLUT(nObjs), vertTrans(nObjs), normalTrans(nObjs), lights(nLights) {}
 
 	thrust::device_vector<uint32_t> indices;
 	thrust::device_vector<Vec3> vertices;
@@ -91,6 +92,7 @@ struct DeviceScene
 	thrust::device_vector<MtlInterval> materialsLUT;
 	thrust::device_vector<Mat4> vertTrans;
 	thrust::device_vector<Mat4> normalTrans;
+	thrust::device_vector<DeltaLight> lights;
 };
 
 class Scene
@@ -107,6 +109,7 @@ private:
 private:
 	std::vector<Mesh> m_meshes;
 	std::map<std::string, Material> m_materials;
+	std::map<std::string, DeltaLight> m_lights;
 
 	// TODO: Add model hierarchy support. 
 };

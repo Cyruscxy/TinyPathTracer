@@ -1,4 +1,5 @@
 #include "mesh.cuh"
+#include "transform.h"
 #include <fstream>
 #include <sstream>
 
@@ -64,7 +65,6 @@ namespace
     };
 }
 
-
 Scene::Scene(const std::string& filename, const std::string& type)
 {
     if ( type == "gltf" )
@@ -100,6 +100,44 @@ void Scene::readFromGLTF(const std::string& filename)
         extensions.push_back(ext);
     }
 
+    auto readTransform = [](const tinygltf::Node& node) -> Transform
+    {
+        auto& rQuat = node.rotation;
+        auto& s = node.scale;
+        auto& loc = node.translation;
+        Quat rotationQuat;
+        Vec3 scale;
+        Vec3 translation;
+        if (!rQuat.empty())
+        {
+            rotationQuat = Quat(
+                static_cast<Real>(rQuat[0]),
+                static_cast<Real>(rQuat[1]),
+                static_cast<Real>(rQuat[2]),
+                static_cast<Real>(rQuat[3]));
+        }
+        if (!s.empty())
+        {
+            scale = Vec3(
+                static_cast<Real>(s[0]),
+                static_cast<Real>(s[1]),
+                static_cast<Real>(s[2]));
+        }
+        else
+        {
+            scale = Vec3(1.0f);
+        }
+        if (!loc.empty())
+        {
+            translation = Vec3(
+                static_cast<Real>(loc[0]),
+                static_cast<Real>(loc[1]),
+                static_cast<Real>(loc[2]));
+        }
+
+        return Transform(translation, rotationQuat, scale);
+    };
+
     for (auto node : model.nodes)
     {
         if (node.camera > -1)
@@ -110,41 +148,7 @@ void Scene::readFromGLTF(const std::string& filename)
                 Real yFov = static_cast<Real>(cameraInfo.perspective.yfov); // in rad
                 Real aspectRatio = static_cast<Real>(cameraInfo.perspective.aspectRatio);
                 Real nearPlane = static_cast<Real>(cameraInfo.perspective.znear);
-
-                auto& rQuat = node.rotation;
-                auto& s = node.scale;
-                auto& loc = node.translation;
-                Quat rotationQuat;
-                Vec3 scale;
-                Vec3 translation;
-                if ( !rQuat.empty() )
-                {
-                    rotationQuat = Quat(
-                        static_cast<Real>(rQuat[0]),
-                        static_cast<Real>(rQuat[1]),
-                        static_cast<Real>(rQuat[2]),
-                        static_cast<Real>(rQuat[3]));
-                }
-                if ( !s.empty() )
-                {
-                    scale = Vec3(
-                        static_cast<Real>(s[0]),
-                        static_cast<Real>(s[1]),
-                        static_cast<Real>(s[2]));
-                }
-                else
-                {
-                    scale = Vec3(1.0f);
-                }
-                if ( !loc.empty() )
-                {
-                    translation = Vec3(
-						static_cast<Real>(loc[0]),
-						static_cast<Real>(loc[1]),
-						static_cast<Real>(loc[2]));
-                }
-
-                m_camera = Camera(yFov, aspectRatio, nearPlane, translation, rotationQuat, scale);
+                m_camera = Camera(yFov, aspectRatio, nearPlane, readTransform(node));
             }
             else if ( cameraInfo.type == "orthographic")
             {
@@ -257,40 +261,47 @@ void Scene::readFromGLTF(const std::string& filename)
             }
 
             // read transform 
-            auto& rQuat = node.rotation;
-            auto& s = node.scale;
-            auto& loc = node.translation;
-            Quat rotationQuat;
-            Vec3 scale;
-            Vec3 translation;
-            if (!rQuat.empty())
+            currentObj.m_transform = std::make_shared<Transform>(readTransform(node));
+            // TODO: Hierarchy transform support
+        }
+        else if ( node.light > -1 )
+        {
+            std::string name = node.name;
+            tinygltf::Light& light = model.lights[node.light];
+            m_lights[name] = {};
+            if ( light.type == "point")
             {
-                rotationQuat = Quat(
-                    static_cast<Real>(rQuat[0]),
-                    static_cast<Real>(rQuat[1]),
-                    static_cast<Real>(rQuat[2]),
-                    static_cast<Real>(rQuat[3]));
+                m_lights[name].type = DeltaLightType::POINT_LIGHT;
+                m_lights[name].light.pl.color = Spectrum(light.color);
+                m_lights[name].light.pl.intensity = static_cast<Real>(light.intensity) * WATTS_PER_LUMEN;
+                m_lights[name].light.pl.pos = (readTransform(node).localToWorld() * Vec4(Vec3(), 1.0f)).xyz();
             }
-            if (!s.empty())
+            else if ( light.type == "directional")
             {
-                scale = Vec3(
-                    static_cast<Real>(s[0]),
-                    static_cast<Real>(s[1]),
-                    static_cast<Real>(s[2]));
+                m_lights[name].type = DeltaLightType::DIRECTIONAL_LIGHT;
+                m_lights[name].light.dl.color = Spectrum(light.color);
+                m_lights[name].light.dl.intensity = static_cast<Real>(light.intensity);
+                m_lights[name].light.dl.direction = (readTransform(node).localToWorld() * Vec4(0.0f, 0.0f, -1.0f, 0.0f)).xyz();
+            }
+            else if ( light.type == "spot")
+            {
+                m_lights[name].type = DeltaLightType::SPOT_LIGHT;
+                m_lights[name].light.sl.color = Spectrum(light.color);
+                m_lights[name].light.sl.intensity = static_cast<Real>(light.intensity) * WATTS_PER_LUMEN;
+
+                Real innerAngle = static_cast<Real>(light.spot.innerConeAngle);
+                Real outerAngle = static_cast<Real>(light.spot.outerConeAngle);
+                m_lights[name].light.sl.cosOuterAngle = std::cos(outerAngle);
+                m_lights[name].light.sl.invCosConeDifference = 1.0f/ (std::cos(innerAngle) - std::cos(outerAngle));
+
+            	Mat4 transMat = readTransform(node).localToWorld();
+            	m_lights[name].light.sl.direction = (transMat * Vec4(0.0f, 0.0f, -1.0f, 0.0f)).xyz();
+                m_lights[name].light.sl.pos = (transMat * Vec4(Vec3(), 1.0f)).xyz();
             }
             else
             {
-                scale = Vec3(1.0f);
+                throw std::runtime_error("Unsupported light type");
             }
-            if (!loc.empty())
-            {
-                translation = Vec3(
-                    static_cast<Real>(loc[0]),
-                    static_cast<Real>(loc[1]),
-                    static_cast<Real>(loc[2]));
-            }
-            currentObj.m_transform = std::make_shared<Transform>(translation, rotationQuat, scale);
-            // TODO: Hierarchy transform support
         }
     }
 }
@@ -307,7 +318,7 @@ DeviceScene Scene::copySceneToDevice()
     }
 
     // allocate device memory for scene elements
-    DeviceScene deviceScene(verticesCount, indicesCount, m_meshes.size(), m_materials.size());
+    DeviceScene deviceScene(verticesCount, indicesCount, m_meshes.size(), m_materials.size(), m_lights.size());
 
     uint32_t currentIndicesCount = 0;
     uint32_t currentVerticesCount = 0;
@@ -373,6 +384,14 @@ DeviceScene Scene::copySceneToDevice()
     }
     thrust::copy(vertTrans.begin(), vertTrans.end(), deviceScene.vertTrans.begin());
     thrust::copy(normalTrans.begin(), normalTrans.end(), deviceScene.normalTrans.begin());
+
+    // copy lights
+    std::vector<DeltaLight> lights;
+    for ( auto& [name, light] : m_lights)
+    {
+        lights.push_back(light);
+    }
+    thrust::copy(lights.begin(), lights.end(), deviceScene.lights.begin());
 
     return deviceScene;
 }
