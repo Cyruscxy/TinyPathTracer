@@ -59,18 +59,18 @@ Ray sampleRays(curandState* randState, Real vFov, Real aspectRatio, Mat4& camera
 }
 
 CUDA_CALLABLE inline
-void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int size, HitStatus& status)
+void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int nFaces, HitStatus& status)
 {
 	int call_stack[64];
 	int stackPtr = 1;
 	call_stack[0] = 0;
-	
+
 	while (stackPtr > 0)
 	{
 		int currentIdx = call_stack[stackPtr - 1];
 		stackPtr--;
 
-		if (currentIdx >= size - 1) // is leaf node
+		if (currentIdx >= nFaces - 1) // is leaf node
 		{
 			int fid = nodes[currentIdx].info.leaf.fid;
 			auto vid0 = indices[3 * fid + 0];
@@ -78,10 +78,9 @@ void traverseBVH(Ray ray, BVHNode* nodes, Vec3* vertices, uint32_t* indices, int
 			auto vid2 = indices[3 * fid + 2];
 			Real hitDist;
 			Vec2 uv;
-			// Shall we do the ray-triangle test here, or later after all collected ?
 			if (rayHitTriangle(ray, vertices[vid0], vertices[vid1], vertices[vid2], hitDist, uv))
 			{
-				if (hitDist < status.hitDist && hitDist > 0.0f)
+				if (hitDist < status.hitDist && hitDist > MathConst::Delta)
 				{
 					status.hitDist = hitDist;
 					status.hitIdx = fid;
@@ -271,7 +270,7 @@ Spectrum sampleDeltaLights(DeltaLight* lights, int nLights, const Vec3& pos, Mat
 	int currentIdx = status.hitIdx;
 	for ( int i = 0; i < nLights; ++i )
 	{
-		status.hitIdx = -1;
+		status = {};
 		Incoming incoming = lights[i].sample(pos);
 		//Incoming incoming;
 
@@ -288,7 +287,7 @@ Spectrum sampleDeltaLights(DeltaLight* lights, int nLights, const Vec3& pos, Mat
 
 __global__
 void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, DeltaLight* lights, MtlInterval* mtlLUT, 
-	Material* materials, Spectrum* color, curandState* globalState, int width, int height, int size, int objCnt, 
+	Material* materials, Spectrum* color, curandState* globalState, int width, int height, int nFaces, int objCnt, 
 	int nLIghts, Real vFov, Real aspectRatio, Mat4* cameraToWorld, int nSamplesPerPixel)
 {
 	int tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
@@ -297,9 +296,10 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 	int pixelX = threadIdx.x + blockDim.x * blockIdx.x;
 	int pixelY = threadIdx.y + blockDim.y * blockIdx.y;
 
+
 	__shared__ Ray rayBuffer[BLK_SIZE];
-	__shared__ Mat4 c2w;
-	if (tidLocal == 0) c2w = *cameraToWorld;
+	__shared__ Mat4 c2w[1];
+	if (tidLocal == 0) c2w[0] = *cameraToWorld;
 	__syncthreads();
 	
 	if (pixelX >= width || pixelY >= height) return;
@@ -313,11 +313,11 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 
 	if constexpr ( RENDER_NORMAL )
 	{
-		rayBuffer[tidLocal] = sampleRays(localState, vFov, aspectRatio, c2w, pixelX, pixelY, width, height);
+		rayBuffer[tidLocal] = sampleRays(localState, vFov, aspectRatio, c2w[0], pixelX, pixelY, width, height);
 		auto& ray = rayBuffer[tidLocal];
 
 		HitStatus status;
-		traverseBVH(ray, nodes, vertices, indices, size, status);
+		traverseBVH(ray, nodes, vertices, indices, nFaces, status);
 
 		if (status.hitIdx < 0) return;
 
@@ -337,14 +337,14 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 		Spectrum totalRad;
 		for ( ; nSamplesPerPixel > 0; nSamplesPerPixel -= 1 )
 		{
-			rayBuffer[tidLocal] = sampleRays(localState, vFov, aspectRatio, c2w, pixelX, pixelY, width, height);
+			rayBuffer[tidLocal] = sampleRays(localState, vFov, aspectRatio, c2w[0], pixelX, pixelY, width, height);
 			auto& ray = rayBuffer[tidLocal];
 			
 			int depth = 0;
 			for (; depth < DEPTH_TRACE; ++depth)
 			{
 				HitStatus status;
-				traverseBVH(ray, nodes, vertices, indices, size, status);
+				traverseBVH(ray, nodes, vertices, indices, nFaces, status);
 				
 				if (status.hitIdx < 0) break; 
 
@@ -356,40 +356,40 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 				Real& v = status.uv.y;
 				Real w = 1.0f - u - v;
 				Vec3 normal = normalize(w * normals[i0] + u * normals[i1] + v * normals[i2]);
-				Vec3 hitPos = ray.m_origin + status.hitDist * ray.m_direction;
+				ray.m_origin = w * vertices[i0] + u * vertices[i1] + v * vertices[i2];
+				//ray.m_origin = ray.m_origin + status.hitDist * ray.m_direction;
 
 				int mtlIndex = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
-				
+
 				Vec3 newDir;
 				Real attenFactor;
 				Real prob = getNewDirection(ray, normal, materials + mtlIndex, localState, newDir, attenFactor);
 				attenuation[depth] = materials[mtlIndex].baseColor * attenFactor;
 				pStack[depth] = prob;
-				ray.m_origin = hitPos + MathConst::Delta * newDir;
 
 				// sample direct light
 				Vec3 directDir;
 				Spectrum directRadiance = sampleDeltaLights(lights, nLIghts, ray.m_origin, materials + mtlIndex, 
-					nodes, vertices, indices,  size, status);
-				status.hitIdx = -1;
+					nodes, vertices, indices, nFaces, status);
+				status = {};
 				if (!(materials[mtlIndex].eta >= 1.0f || materials[mtlIndex].metallic > 0.0f)) {
 					Real directProb = getNewDirection(ray, normal, materials + mtlIndex, localState, directDir, attenFactor);
 					ray.m_direction = directDir;
-					traverseBVH(ray, nodes, vertices, indices, size, status);
+					traverseBVH(ray, nodes, vertices, indices, nFaces, status);
 					if (status.hitIdx >= 0)
 					{
 						int directMtlIdx = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
 						directLightStack[depth] = Spectrum(1.0f) * 
-							(Spectrum(materials[directMtlIdx].emissionFactor) + directRadiance);
+							(Spectrum(materials[directMtlIdx].emissionFactor)) + directRadiance;
 					}
 					else
 					{
-						directLightStack[depth] = directRadiance * materials[mtlIndex].baseColor;
+						directLightStack[depth] = directRadiance;
 					}
 				}
 				else
 				{
-					directLightStack[depth] = directRadiance * materials[mtlIndex].baseColor;
+					directLightStack[depth] = directRadiance;
 				}
 
 				mtlIdxStack[depth] = mtlIndex;
@@ -539,7 +539,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 64;
+	int nSamplesPerPixel = 32;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;

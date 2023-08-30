@@ -24,8 +24,8 @@ struct Incoming
 // calculate the attenuated radiance for distance
 CUDA_CALLABLE inline void CalcDistAttenuation(Incoming& light)
 {
-	// default radius: 0.1f
-	constexpr Real invRadiusSqr = 100.0f;
+	// default radius: 1.0f
+	constexpr Real invRadiusSqr = 0.01f;
 	Real distanceSqr = light.distance * light.distance;
 	Real distanceAttenuation = 1.0f / (distanceSqr + 1.0f);
 	distanceAttenuation *= square(saturate(1.0f - square(distanceSqr * invRadiusSqr)));

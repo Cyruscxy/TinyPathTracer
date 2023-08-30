@@ -32,7 +32,8 @@ struct Picture
 		m_width =		FreeImage_GetWidth(image);
 		m_height =		FreeImage_GetHeight(image);
 		m_pitch =		FreeImage_GetPitch(image);
-		m_channels =	FreeImage_GetBPP(image) / sizeof(uint8_t);
+		m_bpp =			FreeImage_GetBPP(image);
+		m_channels =	m_bpp / sizeof(BYTE);
 		size_t size = (size_t)m_pitch * m_height * m_channels;
 		m_data.resize(size);
 
@@ -46,6 +47,7 @@ struct Picture
 	uint32_t m_width;
 	uint32_t m_height;
 	uint32_t m_pitch;
+	uint32_t m_bpp;
 	uint32_t m_channels;
 };
 

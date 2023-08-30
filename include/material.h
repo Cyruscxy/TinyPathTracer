@@ -13,12 +13,12 @@ struct Spectrum
 	CUDA_CALLABLE Spectrum(Real _r, Real _g, Real _b): r(_r), g(_g), b(_b) {}
 	CUDA_CALLABLE Spectrum(Real f): r(f), g(f), b(f) {}
 	CUDA_CALLABLE Spectrum(Vec3 c): r(c.x), g(c.y), b(c.z) {}
-	CUDA_CALLABLE Spectrum(std::vector<float> c)
+	Spectrum(std::vector<float> c)
 	{
 		assert(c.size() == 3);
 		r = c[0]; g = c[1]; b = c[2];
 	}
-	CUDA_CALLABLE Spectrum(std::vector<double> c)
+	Spectrum(std::vector<double> c)
 	{
 		assert(c.size() == 3);
 		r = static_cast<Real>(c[0]);

@@ -67,7 +67,7 @@ constexpr Real PI = 3.141592653589793f;
 constexpr Real InvPI = 1.0f / PI;
 constexpr Real Rad = PI / 180.f;
 constexpr Real Deg = 180.f / PI;
-constexpr Real Delta = 1e-5f;
+constexpr Real Delta = 2e-4f;
 }
 
 template<typename T>
