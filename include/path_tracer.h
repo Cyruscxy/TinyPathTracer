@@ -10,12 +10,14 @@
 #include "mesh.cuh"
 #include "vkEngine.h"
 #include "bvh.cuh"
+#include "env_light.cuh"
 
 
 class PathTracer
 {
 public:
 	PathTracer();
+	PathTracer(const std::string& envLightFile);
 	
 	void render(const std::string& meshFile);
 private:
@@ -27,6 +29,7 @@ private:
 	thrust::device_vector<Vec3> m_wVertices;
 	thrust::device_vector<Vec3> m_wNormals;
 	std::vector<BVHNode> m_lastNodes;
+	EnvLight envLight;
 
 	void doTrace(DeviceScene& scene, Camera& camera, unsigned char* framebuffer, int nSamplesPerPixel);
 };

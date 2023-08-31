@@ -2,55 +2,17 @@
 #define ENV_LIGHT
 
 #include "texture.h"
-#include "material.h"
 #include "intellisense_cuda.h"
 #include "sampler.h"
 #include <thrust/device_vector.h>
-#include <thrust/execution_policy.h>
-#include <thrust/scan.h>
-
-
-__global__ void initEnvLight(Real* pdf, Real* cdf, Real* data, int height, int width)
-{
-	int pixelX = threadIdx.x + blockIdx.x * blockDim.x;
-	int pixelY = threadIdx.y + blockIdx.y * blockDim.y;
-	if (pixelX >= width || pixelY >= height) return;
-	int offset = pixelX + pixelY * width;
-
-	Real sum = data[width * height - 1];
-	pdf[offset] = data[offset] / sum;
-	if (pixelX == width - 1) cdf[pixelY] = data[pixelY];
-}
 
 class EnvLight
 {
 public:
 	EnvLight() = default;
-	EnvLight(const std::string& file) : m_radiance(file), m_pdf(m_radiance.m_data.size()),
-		m_cdf(m_radiance.m_height), m_importance(m_radiance.m_data.size()), m_intensity(1.0f)
-	{
-		thrust::device_vector<unsigned char> deviceData(m_radiance.m_data.size());
-		thrust::copy(m_radiance.m_data.begin(), m_radiance.m_data.end(), deviceData.begin());
-
-		Real* dp_pdf = thrust::raw_pointer_cast(m_pdf.data());
-		Real* dp_cdf = thrust::raw_pointer_cast(m_cdf.data());
-		Real* dp_importance = thrust::raw_pointer_cast(m_importance.data());
-
-		struct UChar2FLT
-		{
-			CUDA_CALLABLE Real operator()(unsigned char x) const { return (Real)x; }
-		};
-
-		thrust::transform(deviceData.begin(), deviceData.end(), m_importance.begin(), UChar2FLT());
-		thrust::inclusive_scan(thrust::device, m_importance.begin(), m_importance.end(), m_importance.begin());
-
-		dim3 grid((m_radiance.m_width + 15) / 16, (m_radiance.m_height + 15) / 16);
-		dim3 block(16, 16);
-		initEnvLight KERNEL_DIM(grid, block) (dp_pdf, dp_cdf, dp_importance, m_radiance.m_height, m_radiance.m_width);
-	}
+	EnvLight(const std::string& file);
 
 	Texture m_radiance;
-	thrust::device_vector<Real> m_importance;
 	thrust::device_vector<Real> m_pdf;
 	thrust::device_vector<Real> m_cdf;
 	Real m_intensity;
@@ -70,7 +32,7 @@ CUDA_CALLABLE inline Real EnvLightPDF(Vec3 dir, int width, int height, Real* pdf
 	return p;
 }
 
-CUDA_CALLABLE int log2Ceil(int x)
+CUDA_CALLABLE inline int BinarySearchBound(int x)
 {
 	int bits = 1;
 	while (x > 0)
@@ -81,9 +43,9 @@ CUDA_CALLABLE int log2Ceil(int x)
 	return bits;
 }
 
-CUDA_CALLABLE int upper_bound(Real* data, Real ub, int size)
+CUDA_CALLABLE inline int upper_bound(Real* data, Real ub, int size)
 {
-	int bound = log2Ceil(size);
+	int bound = BinarySearchBound(size);
 	int t = 0;
 	for ( int i = bound >> 1 ; i > 0; i >>= 1 )
 	{
@@ -93,7 +55,7 @@ CUDA_CALLABLE int upper_bound(Real* data, Real ub, int size)
 	return t;
 }
 
-CUDA_CALLABLE inline Vec3 EnvLightSample(curandState* state, int width, int height, Real* pdf, Real* cdf)
+__device__ __inline__ Vec3 EnvLightSample(curandState* state, int width, int height, Real* pdf, Real* cdf)
 {
 	int thetaIdx = upper_bound(cdf, DeviceSampler::Unitform(state), height);
 	int phiIdx = upper_bound(pdf + thetaIdx * width, DeviceSampler::Unitform(state) * cdf[thetaIdx], width);
@@ -105,6 +67,14 @@ CUDA_CALLABLE inline Vec3 EnvLightSample(curandState* state, int width, int heig
 	dir.z = sin(theta) * sin(phi);
 	dir.y = cos(theta);
 	return dir;
+}
+
+CUDA_CALLABLE inline Vec2 Vec2UV(const Vec3& dir)
+{
+	Real u = atan2(dir.z, dir.x) / (2.0f * MathConst::PI);
+	if (u < 0.0f) u += 1.0f;
+	Real v = 1.0f - acos(clamp(dir.y, 1.0f, -1.0f)) / MathConst::PI;
+	return Vec2(u, v);
 }
 
 #endif

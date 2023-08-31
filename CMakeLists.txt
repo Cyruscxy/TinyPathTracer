@@ -59,10 +59,11 @@ add_definitions(-DPATH_TO_MESH_DIR="${CMAKE_CURRENT_SOURCE_DIR}/input/")
 add_compile_options(-G)
 add_executable(tinyPathTracer ${CXX_SRCS} ${CU_SRCS} ${HEADERS} ${THIRD_PARTY_SRCS} ${THIRD_PARTY_SRCS})
 
-target_link_libraries(tinyPathTracer ${CMAKE_CURRENT_SOURCE_DIR}/lib/GLFW/glfw3.lib ${VULKAN_LIB_LIST} ${CMAKE_CURRENT_SOURCE_DIR}/lib/FreeImage/FreeImage.lib)
-
 set_target_properties(tinyPathTracer PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
 )
+target_link_libraries(tinyPathTracer ${CMAKE_CURRENT_SOURCE_DIR}/lib/GLFW/glfw3.lib ${VULKAN_LIB_LIST})
+target_link_libraries(tinyPathTracer ${CMAKE_CURRENT_SOURCE_DIR}/lib/FreeImage/FreeImage.lib)
+
 set_directory_properties(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT tinyPathTracer)
 

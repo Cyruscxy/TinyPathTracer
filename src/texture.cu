@@ -27,17 +27,61 @@ __global__ void textureDownsampling(
 
 	uchar4 rgba = tex2D<uchar4>(texIn, inv_w * (0.5f + pixelX) , inv_h * (0.5f + pixelY));
 
-	surf2Dwrite(rgba, texOut, pixelX, pixelY);
+	surf2Dwrite(rgba, texOut, pixelX * sizeof(uchar4), pixelY);
 }
+
+struct addAlpha
+{
+	CUDA_CALLABLE addAlpha() = default;
+
+	__host__ __device__
+	uchar4 operator()(uchar3 bgr)
+	{
+		uchar4 rgba;
+		rgba.x = bgr.z;
+		rgba.y = bgr.y;
+		rgba.z = bgr.x;
+		rgba.w = 255;
+		return rgba;
+	}
+};
+
+struct BGR2RGB
+{
+	CUDA_CALLABLE BGR2RGB() = default;
+
+	__host__ __device__
+	uchar4 operator()(uchar4 bgra) {
+		uchar4 rgba;
+		rgba.x = bgra.z;
+		rgba.y = bgra.y;
+		rgba.z = bgra.x;
+		rgba.w = bgra.w;
+		return rgba;
+	}
+};
 
 Texture::Texture(const std::string& file) : Picture(file)
 {
-	if ( m_channels < 4 )
+	thrust::device_vector<uchar4> deviceData(m_width * m_height);
+	if ( m_channels == 3 )
 	{
-		throw std::runtime_error("Failed to create texture! Choose picture with 4 channels.");
+		thrust::device_vector<uchar3> deviceOldData(m_width * m_height);
+		thrust::copy((uchar3*)m_data.data(), ((uchar3*)m_data.data()) + m_width * m_height, deviceOldData.begin());
+		thrust::transform(deviceOldData.begin(), deviceOldData.end(), deviceData.begin(), addAlpha());
+	}
+	else if ( m_channels == 4 )
+	{
+		thrust::device_vector<uchar4> deviceOldData(m_width* m_height);
+		thrust::copy((uchar4*)m_data.data(), ((uchar4*)m_data.data()) + m_width * m_height, deviceOldData.begin());
+		thrust::transform(deviceOldData.begin(), deviceOldData.end(), deviceData.begin(), BGR2RGB());
+	}
+	else
+	{
+		throw std::runtime_error("Failed to create texture! Choose picture with 3 or 4 channels.");
 	}
 
-	auto basePtr = m_data.data();
+	auto baseLevelData = thrust::raw_pointer_cast(deviceData.data());
 	m_numLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(m_width, m_height))));
 
 	cudaExtent extent = make_cudaExtent(m_width, m_height, 0);
@@ -49,12 +93,12 @@ Texture::Texture(const std::string& file) : Picture(file)
 	CudaCheck(cudaGetMipmappedArrayLevel(&baseLevel, m_cuMipmapArray, 0));
 
 	cudaMemcpy3DParms copyParams{};
-	copyParams.srcPtr = make_cudaPitchedPtr(baseLevel, m_pitch, m_width, m_height);
+	copyParams.srcPtr = make_cudaPitchedPtr(baseLevelData, m_width * 4, m_width, m_height);
 	copyParams.dstArray = baseLevel;
 	copyParams.extent.width = m_width;
 	copyParams.extent.height = m_height;
 	copyParams.extent.depth = 1;
-	copyParams.kind = cudaMemcpyHostToDevice;
+	copyParams.kind = cudaMemcpyDeviceToDevice;
 	CudaCheck(cudaMemcpy3D(&copyParams));
 
 	// generate multilevel mipmap
@@ -83,8 +127,9 @@ Texture::Texture(const std::string& file) : Picture(file)
 		texResDesc.res.array.array = levelFrom;
 
 		cudaTextureDesc texDesc{};
+		memset(&texDesc, 0, sizeof(cudaTextureDesc));
 		texDesc.normalizedCoords = 1;
-		texDesc.filterMode = cudaFilterModeLinear;
+		texDesc.filterMode = cudaFilterModePoint;
 		texDesc.addressMode[0] = cudaAddressModeClamp;
 		texDesc.addressMode[1] = cudaAddressModeClamp;
 		texDesc.addressMode[2] = cudaAddressModeClamp;
@@ -115,7 +160,7 @@ Texture::Texture(const std::string& file) : Picture(file)
 
 	memset(&m_cuTextureDesc, 0, sizeof(cudaTextureDesc));
 	m_cuTextureDesc.normalizedCoords = 1;
-	m_cuTextureDesc.filterMode = cudaFilterModeLinear;
+	m_cuTextureDesc.filterMode = cudaFilterModePoint;
 	m_cuTextureDesc.addressMode[0] = cudaAddressModeClamp;
 	m_cuTextureDesc.addressMode[1] = cudaAddressModeClamp;
 	m_cuTextureDesc.addressMode[2] = cudaAddressModeClamp;
@@ -123,6 +168,30 @@ Texture::Texture(const std::string& file) : Picture(file)
 	m_cuTextureDesc.readMode = cudaReadModeElementType;
 
 	CudaCheck(cudaCreateTextureObject(&m_cuTextureObj, &mipmapTexResDes, &m_cuTextureDesc, nullptr));
+}
+
+Texture::Texture(Texture&& other)
+{
+	m_numLevels = other.m_numLevels;
+	m_cuTextureObj = other.m_cuTextureObj;
+	m_cuChannelDesc = other.m_cuChannelDesc;
+	m_cuMipmapArray = other.m_cuMipmapArray;
+	m_cuTextureDesc = other.m_cuTextureDesc;
+
+	other.m_cuMipmapArray = nullptr;
+	other.m_cuTextureObj = 0;
+}
+
+void Texture::operator=(Texture&& other)
+{
+	m_numLevels = other.m_numLevels;
+	m_cuTextureObj = other.m_cuTextureObj;
+	m_cuChannelDesc = other.m_cuChannelDesc;
+	m_cuMipmapArray = other.m_cuMipmapArray;
+	m_cuTextureDesc = other.m_cuTextureDesc;
+
+	other.m_cuMipmapArray = nullptr;
+	other.m_cuTextureObj = 0;
 }
 
 Texture::~Texture()

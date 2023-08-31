@@ -16,7 +16,7 @@ void checkDeviceVector(thrust::device_vector<T>& src)
 	thrust::copy(src.begin(), src.end(), dst.begin());
 }
 
-inline void specToImage(thrust::device_vector<Spectrum>& radiance, int width, int height) 
+inline void specToImage(thrust::device_vector<Spectrum>& radiance, int width, int height, int nSamplesPerPixel) 
 {
     std::vector<Spectrum> h_radiance(radiance.size());
     thrust::copy(radiance.begin(), radiance.end(), h_radiance.begin());
@@ -29,7 +29,7 @@ inline void specToImage(thrust::device_vector<Spectrum>& radiance, int width, in
     for (uint32_t j = 0; j < height; ++j) {
         BYTE* pixel = (BYTE*)ptr;
         for (uint32_t i = 0; i < width; ++i) {
-            auto color = (h_radiance[i + j * width] / 32).toUChar();
+            auto color = (h_radiance[i + j * width] / nSamplesPerPixel).toUChar();
             pixel[0] = color.z;
             pixel[1] = color.y;
             pixel[2] = color.x;

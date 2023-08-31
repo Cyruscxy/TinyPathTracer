@@ -49,9 +49,7 @@ CUDA_CALLABLE inline int64_t floatTo21Int(float x)
 // TODO: transform from float, should be more precise
 CUDA_CALLABLE inline int64_t getMortonCode(Vec3 point)
 {
-	/*int64_t ix = ((*(int32_t*)(&point.x)) >> 2) & 0x1ffffflu;
-	int64_t iy = ((*(int32_t*)(&point.y)) >> 2) & 0x1ffffflu;
-	int64_t iz = ((*(int32_t*)(&point.z)) >> 2) & 0x1ffffflu;*/
+
 	int64_t ix = floatTo21Int(point.x);
 	int64_t iy = floatTo21Int(point.y);
 	int64_t iz = floatTo21Int(point.z);

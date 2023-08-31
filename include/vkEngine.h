@@ -21,7 +21,7 @@ public:
 	bool m_framebufferResized{ false };
 	int m_numFrames{ 0 };
 
-	VkExtent2D							m_windowExtent{ 1280, 720 };
+	VkExtent2D							m_windowExtent{ 1920, 1080 };
 	GLFWwindow*							m_window;
 
 	VkInstance							m_instance;

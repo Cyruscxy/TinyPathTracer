@@ -285,10 +285,18 @@ Spectrum sampleDeltaLights(DeltaLight* lights, int nLights, const Vec3& pos, Mat
 	return radiance;
 }
 
+__device__ __inline__
+Spectrum sampleEnvLights(cudaTextureObject_t envLight, Vec3 dir)
+{
+	Vec2 uv = Vec2UV(dir);
+	uchar4 rgba = tex2DLod<uchar4>(envLight, uv.x, uv.y, 0);
+	return Spectrum(rgba.x, rgba.y, rgba.z) / 255.0f;
+}
+
 __global__
 void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, DeltaLight* lights, MtlInterval* mtlLUT, 
-	Material* materials, Spectrum* color, curandState* globalState, int width, int height, int nFaces, int objCnt, 
-	int nLIghts, Real vFov, Real aspectRatio, Mat4* cameraToWorld, int nSamplesPerPixel)
+	Material* materials, Spectrum* color, curandState* globalState, cudaTextureObject_t envLight, int width, int height, int nFaces, int objCnt,
+	int nLights, Real vFov, Real aspectRatio, Mat4* cameraToWorld, int nSamplesPerPixel)
 {
 	int tidLocal = threadIdx.x + threadIdx.y * blockDim.x;
 	int bid = blockIdx.x + gridDim.x * blockIdx.y;
@@ -341,12 +349,17 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 			auto& ray = rayBuffer[tidLocal];
 			
 			int depth = 0;
-			for (; depth < DEPTH_TRACE; ++depth)
+			Spectrum radiance;
+			for (; depth < DEPTH_TRACE; depth += 1)
 			{
 				HitStatus status;
 				traverseBVH(ray, nodes, vertices, indices, nFaces, status);
 				
-				if (status.hitIdx < 0) break; 
+				if (status.hitIdx < 0)
+				{
+					radiance = sampleEnvLights(envLight, ray.m_direction);
+					break;
+				}
 
 				uint32_t i0 = indices[status.hitIdx * 3 + 0];
 				uint32_t i1 = indices[status.hitIdx * 3 + 1];
@@ -356,8 +369,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 				Real& v = status.uv.y;
 				Real w = 1.0f - u - v;
 				Vec3 normal = normalize(w * normals[i0] + u * normals[i1] + v * normals[i2]);
-				ray.m_origin = w * vertices[i0] + u * vertices[i1] + v * vertices[i2];
-				//ray.m_origin = ray.m_origin + status.hitDist * ray.m_direction;
+				ray.m_origin = ray.m_origin + status.hitDist * ray.m_direction;
 
 				int mtlIndex = mtlLinearSearch(status.hitIdx, mtlLUT, objCnt);
 
@@ -369,7 +381,7 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 
 				// sample direct light
 				Vec3 directDir;
-				Spectrum directRadiance = sampleDeltaLights(lights, nLIghts, ray.m_origin, materials + mtlIndex, 
+				Spectrum directRadiance = sampleDeltaLights(lights, nLights, ray.m_origin, materials + mtlIndex, 
 					nodes, vertices, indices, nFaces, status);
 				status = {};
 				if (!(materials[mtlIndex].eta >= 1.0f || materials[mtlIndex].metallic > 0.0f)) {
@@ -403,7 +415,6 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 
 			// sample indirect light
 			depth -= 1;
-			Spectrum radiance;
 			while (depth >= 0)
 			{
 				auto* mtl = materials + mtlIdxStack[depth];
@@ -421,6 +432,20 @@ void trace(BVHNode* nodes, Vec3* vertices, Vec3* normals, uint32_t* indices, Del
 		}
 		color[offset] += totalRad;
 	}
+}
+
+__global__ void displayEnv(cudaTextureObject_t envLight, Spectrum* radiance, int height, int width)
+{
+	int pixelX = threadIdx.x + blockDim.x * blockIdx.x;
+	int pixelY = threadIdx.y + blockDim.y * blockIdx.y;
+	if (pixelX >= width || pixelY >= height) return;
+	int offset = pixelX + pixelY * width;
+
+	Real x = (Real)pixelX / width;
+	Real y = (Real)pixelY / height;
+
+	uchar4 rgba = tex2DLod<uchar4>(envLight, x, y, 0);
+	radiance[offset] = Spectrum(rgba.x, rgba.y, rgba.z) * 32.0f / 255.0f;
 }
 
 __global__
@@ -457,6 +482,11 @@ m_randStates(m_width * m_height),
 m_radiance(m_width * m_height),
 m_wVertices(0),
 m_wNormals(0) {}
+
+PathTracer::PathTracer(const std::string& envLightFile) : PathTracer()
+{
+	if (envLightFile != "") envLight = EnvLight(envLightFile);
+}
 
 void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* framebuffer, int nSamplesPerPixel)
 {
@@ -501,37 +531,24 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 	dim3 blk_config(BLK_DIM, BLK_DIM);
 	dim3 grid_config((m_width + BLK_DIM - 1) / BLK_DIM, (m_height + BLK_DIM - 1) / BLK_DIM);
 
-	/*checkDeviceVector(d_scene.vertices);
-	checkDeviceVector(d_scene.vertTrans);
-	checkDeviceVector(d_scene.indices);
-	checkDeviceVector(d_scene.normalTrans);
-	checkDeviceVector(d_scene.materialsLUT);*/
-
 	thrust::fill(m_radiance.begin(), m_radiance.end(), Spectrum());
 
 	transform KERNEL_DIM(((nFaces + BLK_SIZE - 1) / BLK_SIZE), BLK_SIZE) (dp_vertices, dp_normals, dp_indices, 
 		dp_mtlInterval, dp_vertTrans, dp_normalTrans, dp_wVertices, dp_wNormals, nFaces, nObjs);
-	/*checkDeviceVector(m_wVertices);
-	checkDeviceVector(m_wNormals);*/
-	//checkVertices(d_scene.indices, m_wVertices);
 	CUDA_CHECK(cudaDeviceSynchronize());
 
 	// constructs bvh every frame
 	BVH bvh(nFaces);
 	bvh.construct(m_wVertices, d_scene.indices);
+
 	BVHNode* dp_bvhNodes = thrust::raw_pointer_cast(bvh.m_nodes.data());
-	// checkBVHNodes(bvh.m_nodes);
-
-	//thrust::device_vector<int> d_hitRecord(m_width * m_height, -1);
-	//int* dp_hitRecord = thrust::raw_pointer_cast(d_hitRecord.data());
-
+	CUDA_CHECK(cudaDeviceSynchronize());
+	auto envLightTex = envLight.m_radiance.getTexture();
 	
 	trace KERNEL_DIM(grid_config, blk_config) (dp_bvhNodes, dp_wVertices, dp_wNormals, dp_indices, dp_lights,
-		dp_mtlInterval, dp_mtls, dp_radiance, dp_states, m_width, m_height, nFaces, nObjs, nLights, vFov, aspRatio, 
+		dp_mtlInterval, dp_mtls, dp_radiance, dp_states, envLightTex, m_width, m_height, nFaces, nObjs, nLights, vFov, aspRatio,
 		dp_c2w, nSamplesPerPixel);
 	CUDA_CHECK(cudaDeviceSynchronize());
-	/*checkDeviceVector(d_hitRecord);
-	checkHitStatus(d_hitRecord, m_width, m_height);*/
 	
 	copyToFB KERNEL_DIM(grid_config, blk_config) (dp_radiance, framebuffer, m_height, m_width, nSamplesPerPixel);
 }
@@ -539,7 +556,7 @@ void PathTracer::doTrace(DeviceScene& d_scene, Camera& camera, unsigned char* fr
 void PathTracer::render(const std::string& meshFile)
 {
 	Scene scene(meshFile, "gltf");
-	int nSamplesPerPixel = 32;
+	int nSamplesPerPixel = 64;
 
 	DeviceScene d_scene = scene.copySceneToDevice();
 	Camera& camera = scene.m_camera;
